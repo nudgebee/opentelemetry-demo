@@ -4,7 +4,7 @@ import com.google.protobuf.gradle.*
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
-    kotlin("jvm") version "2.2.10"
+    kotlin("jvm") version "2.2.20"
     application
     id("java")
     id("idea")
@@ -17,7 +17,7 @@ version = "1.0"
 
 
 val grpcVersion = "1.75.0"
-val protobufVersion = "4.32.0"
+val protobufVersion = "4.32.1"
 
 
 repositories {
@@ -43,7 +43,7 @@ dependencies {
     implementation("org.apache.logging.log4j:log4j-core:2.25.1")
     implementation("org.slf4j:slf4j-api:2.0.17")
     implementation("com.google.protobuf:protobuf-kotlin:${protobufVersion}")
-    implementation("dev.openfeature:sdk:1.17.0")
+    implementation("dev.openfeature:sdk:1.18.0")
     implementation("dev.openfeature.contrib.providers:flagd:0.11.15")
 
     if (JavaVersion.current().isJava9Compatible) {
