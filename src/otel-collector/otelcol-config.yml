@@ -20,10 +20,20 @@ receivers:
     collection_interval: 10s
   docker_stats:
     endpoint: unix:///var/run/docker.sock
+    # https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/44511
+    api_version: "1.44"
+  kafkametrics:
+    scrapers:
+      - brokers
+      - topics
+      - consumers
+    brokers:
+      - ${KAFKA_ADDR}
+    collection_interval: 10s
   postgresql:
-    endpoint: "postgresql:5432"
-    username: "root"
-    password: "otel"
+    endpoint: ${POSTGRES_HOST}:${POSTGRES_PORT}
+    username: monitoring_user
+    password: ${env:POSTGRES_MONITORING_PASSWORD}
     metrics:
       postgresql.blks_hit:
         enabled: true
@@ -119,14 +129,18 @@ receivers:
             enabled: true
 exporters:
   debug:
-  otlp:
+  otlp_grpc/jaeger:
     endpoint: "jaeger:4317"
     tls:
       insecure: true
-  otlphttp/prometheus:
+    sending_queue:
+      batch:
+  otlp_http/prometheus:
     endpoint: "http://prometheus:9090/api/v1/otlp"
     tls:
       insecure: true
+    sending_queue:
+      batch:
   opensearch:
     logs_index: otel-logs
     logs_index_time_format: "yyyy-MM-dd"
@@ -134,22 +148,63 @@ exporters:
       endpoint: "http://opensearch:9200"
       tls:
         insecure: true
+    sending_queue:
+      # Explicitly set due to bug: https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/45016
+      num_consumers: 10
+      queue_size: 1000
+      batch:
 processors:
-  batch:
   memory_limiter:
     check_interval: 5s
     limit_percentage: 80
     spike_limit_percentage: 25
   resourcedetection:
     detectors: [env, docker, system]
-  transform:
+  transform/sanitize_spans:
     error_mode: ignore
     trace_statements:
       - context: span
         statements:
-          # could be removed when https://github.com/vercel/next.js/pull/64852 is fixed upstream
-          - replace_pattern(name, "\\?.*", "")
-          - replace_match(name, "GET /api/products/*", "GET /api/products/{productId}")
+          # Sanitize spans to prevent span metrics cardinality explosion
+          # caused by non-compliant high cardinality span names:
+          # 1. Define missing http.route on key HTTP operations for meaningful operation names
+          # 2. Then normalize span names; http server spans lacking http.route default to operations "GET", "POST", etc.
+
+          # FRONTEND SERVICE
+
+          # Workaround for Next.js high cardinality span name issue: https://github.com/vercel/next.js/issues/54694
+          - set(span.attributes["http.route"], "/api/cart") where
+            span.kind == SPAN_KIND_SERVER and
+            resource.attributes["service.name"] == "frontend" and
+            span.attributes["http.route"] == nil and
+            IsMatch(span.attributes["http.target"], "\\/api\\/cart")  # e.g. # /api/cart
+
+          - set(span.attributes["http.route"], "/api/checkout") where
+            span.kind == SPAN_KIND_SERVER and
+            resource.attributes["service.name"] == "frontend" and
+            span.attributes["http.route"] == nil and
+            IsMatch(span.attributes["http.target"], "\\/api\\/checkout")  # e.g. # /api/checkout
+
+          - set(span.attributes["http.route"], "/api/products/{productId}") where
+            span.kind == SPAN_KIND_SERVER and
+            resource.attributes["service.name"] == "frontend" and
+            span.attributes["http.route"] == nil and
+            IsMatch(span.attributes["http.target"], "\\/api\\/products\\/.*")  # e.g. /api/products/1YMWWN1N4O
+
+          - set(span.attributes["http.route"], "/api/recommendations") where
+            span.kind == SPAN_KIND_SERVER and
+            resource.attributes["service.name"] == "frontend" and
+            span.attributes["http.route"] == nil and
+            IsMatch(span.attributes["http.target"], "\\/api\\/recommendations")  # e.g. # /api/recommendations?productIds=...
+
+          - set(span.attributes["http.route"], "/api/data") where
+            span.kind == SPAN_KIND_SERVER and
+            resource.attributes["service.name"] == "frontend" and
+            span.attributes["http.route"] == nil and
+            IsMatch(span.attributes["http.target"], "\\/api\\/data.*")  # e.g. # " /api/data?contextKeys=telescopes" or /api/data/?contextKeys=cameras
+
+          # SANITIZE ALL SPAN NAMES TO PREVENT CARDINALITY EXPLOSION
+          - set_semconv_span_name("1.37.0", "original_span_name")
 
 connectors:
   spanmetrics:
@@ -158,24 +213,30 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [resourcedetection, memory_limiter, transform, batch]
-      exporters: [otlp, debug, spanmetrics]
+      processors: [resourcedetection, memory_limiter, transform/sanitize_spans]
+      exporters: [otlp_grpc/jaeger, debug, spanmetrics]
     metrics:
-      receivers: [docker_stats, httpcheck/frontend-proxy, hostmetrics, nginx, otlp, postgresql, redis, spanmetrics]
-      processors: [resourcedetection, memory_limiter, batch]
-      exporters: [otlphttp/prometheus, debug]
+      receivers: [docker_stats, httpcheck/frontend-proxy, hostmetrics, nginx, otlp, postgresql, redis, spanmetrics, kafkametrics]
+      processors: [resourcedetection, memory_limiter]
+      exporters: [otlp_http/prometheus, debug]
     logs:
       receivers: [otlp]
-      processors: [resourcedetection, memory_limiter, batch]
+      processors: [resourcedetection, memory_limiter]
       exporters: [opensearch, debug]
   telemetry:
     metrics:
-      level: detailed
       readers:
         - periodic:
-            interval: 10000
-            timeout: 5000
             exporter:
               otlp:
                 protocol: http/protobuf
+                # replace with your observability meta monitoring backend
+                endpoint: http://${env:OTEL_COLLECTOR_HOST}:${env:OTEL_COLLECTOR_PORT_HTTP}
+    logs:
+      processors:
+        - batch:
+            exporter:
+              otlp:
+                protocol: http/protobuf
+                # replace with your observability meta monitoring backend
                 endpoint: http://${env:OTEL_COLLECTOR_HOST}:${env:OTEL_COLLECTOR_PORT_HTTP}

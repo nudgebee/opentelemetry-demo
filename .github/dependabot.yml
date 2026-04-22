@@ -13,6 +13,7 @@ updates:
   - package-ecosystem: "gomod"
     directories:
       - "/src/**/*"
+      - "/internal/tools/**/*"
     groups:
       go-production-dependencies:
         dependency-type: "production"
@@ -21,6 +22,8 @@ updates:
   - package-ecosystem: "gradle"
     directories:
       - "/src/**/*"
+    exclude-paths:
+      - "/src/react-native-app/**"
     groups:
       gradle-production-dependencies:
         dependency-type: "production"
@@ -53,7 +56,6 @@ updates:
   - package-ecosystem: "npm"
     directories:
       - "/"
-      - "/src/flagd-ui/*"
       - "/src/frontend/*"
       - "/src/payment/*"
     groups:
@@ -71,6 +73,8 @@ updates:
         dependency-type: "production"
     schedule:
       interval: "daily"
+    allow:
+      - dependency-type: "all"
   - package-ecosystem: "bundler"
     directories:
       - "/src/email/*"
@@ -79,5 +83,15 @@ updates:
         dependency-type: "production"
       bundler-development-dependencies:
         dependency-type: "development"
+    schedule:
+      interval: "daily"
+    allow:
+      - dependency-type: "all"
+  - package-ecosystem: "mix"
+    directories:
+      - "/src/flagd-ui/*"
+    groups:
+      mix-production-dependencies:
+        dependency-type: "production"
     schedule:
       interval: "daily"
