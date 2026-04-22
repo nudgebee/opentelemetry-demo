@@ -28,3 +28,14 @@ grafana:
   enabled: false
 opensearch:
   enabled: false
+
+# Temporary: explicit resources to transition from previous values that had
+# requests: 128Mi. Strategic merge patch won't clear old requests field,
+# so we set requests explicitly. Can be removed once the old ReplicaSet is gone.
+components:
+  product-catalog:
+    resources:
+      requests:
+        memory: 20Mi
+      limits:
+        memory: 20Mi
