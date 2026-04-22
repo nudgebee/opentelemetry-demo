@@ -550,10 +550,6 @@ components:
         value: http://$(OTEL_COLLECTOR_NAME):4317
       - name: GOMEMLIMIT
         value: 16MiB
-    mountedConfigMaps:
-      - name: product-catalog-products
-        mountPath: /usr/src/app/products
-        existingConfigMap: product-catalog-products
     resources:
       limits:
         memory: 128Mi
