@@ -540,19 +540,21 @@ components:
     env:
       - name: PRODUCT_CATALOG_PORT
         value: "8080"
-      - name: PRODUCT_CATALOG_RELOAD_INTERVAL
-        value: "10"
       - name: FLAGD_HOST
         value: flagd
       - name: FLAGD_PORT
         value: "8013"
+      - name: DB_CONNECTION_STRING
+        value: postgres://otelu:otelp@postgresql/otel?sslmode=disable
+      - name: OTEL_SEMCONV_STABILITY_OPT_IN
+        value: database
       - name: OTEL_EXPORTER_OTLP_ENDPOINT
         value: http://$(OTEL_COLLECTOR_NAME):4317
       - name: GOMEMLIMIT
-        value: 100MiB
+        value: 16MiB
     resources:
       limits:
-        memory: 128Mi
+        memory: 20Mi
 
   quote:
     enabled: true
