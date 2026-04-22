@@ -389,7 +389,7 @@ components:
         cpu: "0.01"
         memory: "100Mi"
       limits:
-        memory: "65Mi"
+        memory: "250Mi"
     securityContext:
       runAsUser: 1001  # nextjs
       runAsGroup: 1001
@@ -556,7 +556,7 @@ components:
         existingConfigMap: product-catalog-products
     resources:
       limits:
-        memory: 20Mi
+        memory: 128Mi
 
   quote:
     enabled: true
