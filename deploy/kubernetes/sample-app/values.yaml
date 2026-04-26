@@ -33,6 +33,14 @@ opensearch:
 # requests: 128Mi. Strategic merge patch won't clear old requests field,
 # so we set requests explicitly. Can be removed once the old ReplicaSet is gone.
 components:
+  ad:
+    resources:
+      requests:
+        cpu: 120m
+        memory: 360Mi
+      limits:
+        cpu: 120m
+        memory: 360Mi
   product-catalog:
     resources:
       requests:
