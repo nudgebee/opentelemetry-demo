@@ -39,3 +39,7 @@ components:
         memory: 20Mi
       limits:
         memory: 20Mi
+  ad:
+    resources:
+      limits:
+        memory: 360Mi
