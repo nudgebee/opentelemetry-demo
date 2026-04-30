@@ -1,3 +1,6 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
 # Nudgebee Demo Environment - OpenTelemetry Demo Helm Values
 #
 # Minimal overrides from chart defaults. Per-component env vars come from
