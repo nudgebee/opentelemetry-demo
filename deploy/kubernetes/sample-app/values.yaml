@@ -1,3 +1,6 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
 # Nudgebee Demo Environment - OpenTelemetry Demo Helm Values
 #
 # Minimal overrides from chart defaults. Per-component env vars come from
@@ -28,6 +31,89 @@ grafana:
   enabled: false
 opensearch:
   enabled: false
+
+# Re-wire Jaeger SPM (Monitor tab) to point at the real Prometheus-compatible
+# endpoint and external otel-collector, since this values file disables the
+# chart's built-in `prometheus` and `opentelemetry-collector`. Without this
+# override the chart defaults (`prometheus:9090`, `otel-collector:4318`) fail
+# DNS lookup in the demo namespace and the Monitor tab errors out.
+#
+# normalize_calls/normalize_duration are flipped to false because the
+# spanmetrics in VictoriaMetrics are exported as `traces_span_metrics_calls`
+# (no `_total`) and `traces_span_metrics_duration_*` (no time-unit suffix).
+jaeger:
+  jaeger:
+    extraEnv:
+      - name: MEMORY_MAX_TRACES
+        value: "25000"
+      - name: PROMETHEUS_ADDR
+        value: vmsingle-victoria-victoria-metrics-k8s-stack.victoria.svc.cluster.local:8429
+      - name: OTEL_COLLECTOR_HOST
+        value: otel-deployment-collector-collector.otel.svc.cluster.local
+      - name: OTEL_COLLECTOR_PORT_HTTP
+        value: "4318"
+      - name: JAEGER_HOST
+        value: "0.0.0.0"
+      - name: JAEGER_GRPC_PORT
+        value: "4317"
+  userconfig: |
+    service:
+      extensions: [jaeger_storage, jaeger_query, healthcheckv2]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [jaeger_storage_exporter]
+      telemetry:
+        resource:
+          service.name: jaeger
+        metrics:
+          level: detailed
+          readers:
+            - periodic:
+                interval: 10000
+                timeout: 5000
+                exporter:
+                  otlp:
+                    protocol: http/protobuf
+                    endpoint: http://${env:OTEL_COLLECTOR_HOST}:${env:OTEL_COLLECTOR_PORT_HTTP}
+                    insecure: true
+        logs:
+          level: info
+    extensions:
+      healthcheckv2:
+        use_v2: true
+        http:
+          endpoint: 0.0.0.0:13133
+      jaeger_query:
+        storage:
+          traces: memory_backend
+          metrics: metrics_backend
+        base_path: /jaeger/ui
+      jaeger_storage:
+        backends:
+          memory_backend:
+            memory:
+              max_traces: ${env:MEMORY_MAX_TRACES}
+        metric_backends:
+          metrics_backend:
+            prometheus:
+              endpoint: "http://${env:PROMETHEUS_ADDR}"
+              normalize_calls: false
+              normalize_duration: false
+
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: ${env:JAEGER_HOST}:${env:JAEGER_GRPC_PORT}
+
+    processors:
+      batch:
+
+    exporters:
+      jaeger_storage_exporter:
+        trace_storage: memory_backend
 
 # Temporary: explicit resources to transition from previous values that had
 # requests: 128Mi. Strategic merge patch won't clear old requests field,
