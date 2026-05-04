@@ -125,3 +125,10 @@ components:
         memory: 20Mi
       limits:
         memory: 20Mi
+  ad:
+    resources:
+      requests:
+        cpu: 120m
+      limits:
+        cpu: 120m
+        memory: 360Mi
