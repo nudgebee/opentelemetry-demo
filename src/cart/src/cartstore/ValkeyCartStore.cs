@@ -73,7 +73,7 @@ public class ValkeyCartStore : ICartStore
 
     private void EnsureRedisConnected()
     {
-        if (_isRedisConnectionOpened)
+        if (_isRedisConnectionOpened && _redis != null && _redis.IsConnected)
         {
             return;
         }
@@ -81,7 +81,7 @@ public class ValkeyCartStore : ICartStore
         // Connection is closed or failed - open a new one but only at the first thread
         lock (_locker)
         {
-            if (_isRedisConnectionOpened)
+            if (_isRedisConnectionOpened && _redis != null && _redis.IsConnected)
             {
                 return;
             }
@@ -91,39 +91,39 @@ public class ValkeyCartStore : ICartStore
                 _logger.LogDebug("Connecting to Redis: {connectionString}", _connectionString);
             }
 
-            _redis = ConnectionMultiplexer.Connect(_redisConnectionOptions);
-
-            if (_redis == null || !_redis.IsConnected)
+            if (_redis == null)
             {
-                _logger.LogError("Wasn't able to connect to redis");
+                _redis = ConnectionMultiplexer.Connect(_redisConnectionOptions);
+                _redis.InternalError += (_, e) => { _logger.LogError(e.Exception, "Redis internal error"); };
+                _redis.ConnectionRestored += (_, _) =>
+                {
+                    _isRedisConnectionOpened = true;
+                    _logger.LogInformation("Connection to redis was restored successfully.");
+                };
+                _redis.ConnectionFailed += (_, _) =>
+                {
+                    _logger.LogInformation("Connection failed. Redis will attempt to reconnect automatically.");
+                    _isRedisConnectionOpened = false;
+                };
+            }
 
-                // We weren't able to connect to Redis despite some retries with exponential backoff.
-                throw new ApplicationException("Wasn't able to connect to redis");
+            if (!_redis.IsConnected)
+            {
+                _logger.LogWarning("Redis is not connected yet. It will continue to try in the background.");
+                return;
             }
 
             _logger.LogInformation("Successfully connected to Redis");
             var cache = _redis.GetDatabase();
 
             _logger.LogDebug("Performing small test");
-            cache.StringSet("cart", "OK" );
-            object res = cache.StringGet("cart");
+            cache.StringSet("healthcheck", "OK" );
+            object res = cache.StringGet("healthcheck");
 
             if (_logger.IsEnabled(LogLevel.Debug))
             {
                 _logger.LogDebug("Small test result: {result}", res);
             }
-
-            _redis.InternalError += (_, e) => { Console.WriteLine(e.Exception); };
-            _redis.ConnectionRestored += (_, _) =>
-            {
-                _isRedisConnectionOpened = true;
-                _logger.LogInformation("Connection to redis was restored successfully.");
-            };
-            _redis.ConnectionFailed += (_, _) =>
-            {
-                _logger.LogInformation("Connection failed. Disposing the object");
-                _isRedisConnectionOpened = false;
-            };
 
             _isRedisConnectionOpened = true;
         }
