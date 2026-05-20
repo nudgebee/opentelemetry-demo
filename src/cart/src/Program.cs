@@ -101,6 +101,12 @@ app.Services.GetRequiredService<StackExchangeRedisInstrumentation>().AddConnecti
 app.MapGrpcService<CartService>();
 app.MapGrpcService<HealthServiceImpl>();
 
+// HTTP /healthz mirrors the gRPC readinessCheck so k8s can use httpGet probes.
+// The chart's values.schema.json restricts probe definitions to httpGet, and
+// without a probe wired in k8s the `failedReadinessProbe` flag never surfaces
+// as an Unhealthy event. Same readinessCheck instance powers both transports.
+app.MapHealthChecks("/healthz");
+
 app.MapGet("/", async context =>
 {
     await context.Response.WriteAsync("Communication with gRPC endpoints must be made through a gRPC client. To learn how to create a client, visit: https://go.microsoft.com/fwlink/?linkid=2086909");
