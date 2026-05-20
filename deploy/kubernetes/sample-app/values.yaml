@@ -140,21 +140,20 @@ components:
       limits:
         memory: 20Mi
 
-  # cart probe gap — NOT fixable from values here.
-  #
-  # Cart's gRPC health check already reads the `failedReadinessProbe` flag
-  # (Program.cs:84, AddCheck<readinessCheck>("oteldemo.CartService")) and
-  # k8s 1.24+ supports native gRPC probes — but the chart's values.schema.json
-  # restricts probe definitions to `httpGet` only (`additionalProperties:
-  # false`, `required: [httpGet]`). We can't slot a `grpc:` or `tcpSocket:`
-  # probe in via values without violating the schema, and cart doesn't expose
-  # an HTTP endpoint suitable for a real liveness/readiness check.
-  #
-  # Two paths to actually fix this (both out of scope for this PR):
-  #   1. PR upstream `open-telemetry/opentelemetry-helm-charts` to widen the
-  #      probe schema to k8s-standard `oneOf: [httpGet, grpc, tcpSocket, exec]`.
-  #   2. Add a thin HTTP `/healthz` endpoint to cart that mirrors the gRPC
-  #      health check, then point httpGet at it.
+  # cart — wire a readinessProbe so the `failedReadinessProbe` flag manifests
+  # as a k8s Unhealthy event. Cart's gRPC health check already reads the flag,
+  # but the chart's values.schema.json only accepts `httpGet` probes. To bridge
+  # that, Program.cs adds an HTTP `/healthz` endpoint backed by the same
+  # `readinessCheck` instance, served on cart's existing Kestrel port (8080
+  # by default, multiplexed with gRPC over h2c). httpGet here points at it.
+  cart:
+    readinessProbe:
+      httpGet:
+        path: /healthz
+        port: 8080
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      failureThreshold: 3
 
   # ad — set a CPU limit so `adHighCpu` produces throttling metrics.
   # Without a limit, the flag's CPU burn just consumes node CPU and the
