@@ -146,7 +146,15 @@ components:
   # that, Program.cs adds an HTTP `/healthz` endpoint backed by the same
   # `readinessCheck` instance, served on cart's existing Kestrel port (8080
   # by default, multiplexed with gRPC over h2c). httpGet here points at it.
+  #
+  # imageOverride points at the fork-built image (ghcr.io/nudgebee/opentelemetry-demo)
+  # because /healthz was added in this fork; upstream `ghcr.io/open-telemetry/demo`
+  # has no such endpoint and the probe would 404 on every poll.
   cart:
+    imageOverride:
+      repository: ghcr.io/nudgebee/opentelemetry-demo
+      tag: latest-cart
+      pullPolicy: Always
     readinessProbe:
       httpGet:
         path: /healthz
