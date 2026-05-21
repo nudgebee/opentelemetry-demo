@@ -16,8 +16,8 @@ jobs:
       contents: read
       packages: write
     uses: ./.github/workflows/component-build-images.yml
-    if: ${{ !github.event.repository.fork }}
     with:
       push: true
       version: nightly
+      ghcr_repo: ghcr.io/nudgebee/opentelemetry-demo
     secrets: inherit
