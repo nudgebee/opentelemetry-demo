@@ -4,7 +4,7 @@ The LLM service is used by the Product Review service to provide
 AI-generated summaries of product reviews.
 
 While it's not an actual Large Language Model, the LLM pretends to be one
-by following the [OpenAI API format for chat completions](https://platform.openai.com/docs/api-reference/chat/create).
+by following the [OpenAI API format for chat completions](https://platform.openai.com/docs/api-reference/chat).
 
 The Product Review service is then instrumented with the
 [opentelemetry-instrumentation-openai-v2](https://pypi.org/project/opentelemetry-instrumentation-openai-v2/)
