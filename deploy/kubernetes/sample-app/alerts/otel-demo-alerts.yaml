@@ -1,21 +1,25 @@
 # Copyright The OpenTelemetry Authors
 # SPDX-License-Identifier: Apache-2.0
 #
-# VictoriaMetrics alert rules for the otel-demo sample-app. These are the
-# baseline rules that fire on application-level signals exported via OTel
-# (HTTP request errors/latency, gRPC server + client errors). They are scoped
-# to namespace="demo" — change the selector if the demo is deployed elsewhere.
+# Alert rules for the otel-demo sample-app. Defined as a PrometheusRule
+# (prometheus-operator CRD) so the same manifest works against any
+# Prometheus-Operator-compatible stack: vanilla kube-prometheus-stack,
+# victoria-metrics-k8s-stack (the operator converts PrometheusRule into
+# its internal VMRule shape automatically), and other compatible operators.
 #
-# Previously hand-applied to the `victoria` namespace (no source-of-truth in
-# this repo). Moving here so the rule set ships with the demo and is reviewed
-# alongside any application-side changes that touch these metrics.
-apiVersion: operator.victoriametrics.com/v1beta1
-kind: VMRule
+# Expressions use standard PromQL only — no MetricsQL extensions — so the
+# rules evaluate identically against Prometheus, Mimir, Thanos, and
+# VictoriaMetrics backends.
+#
+# Scoped to namespace="demo"; adjust the selector if the demo is deployed
+# elsewhere.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
 metadata:
   name: otel-demo-alerts
   namespace: victoria
   labels:
-    app: victoria-metrics-k8s-stack
+    app: otel-demo
 spec:
   groups:
     - name: otel-demo-http-errors
