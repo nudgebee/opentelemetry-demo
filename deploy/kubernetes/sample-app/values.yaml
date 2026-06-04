@@ -56,7 +56,7 @@ jaeger:
         value: "0.0.0.0"
       - name: JAEGER_GRPC_PORT
         value: "4317"
-  userconfig: |
+  userconfig:
     service:
       extensions: [jaeger_storage, jaeger_query, healthcheckv2]
       pipelines:
