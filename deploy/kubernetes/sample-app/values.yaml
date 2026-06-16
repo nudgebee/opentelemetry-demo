@@ -56,7 +56,7 @@ jaeger:
         value: "0.0.0.0"
       - name: JAEGER_GRPC_PORT
         value: "4317"
-  userconfig: |
+  userconfig:
     service:
       extensions: [jaeger_storage, jaeger_query, healthcheckv2]
       pipelines:
@@ -115,9 +115,23 @@ jaeger:
       jaeger_storage_exporter:
         trace_storage: memory_backend
 
-# Temporary: explicit resources to transition from previous values that had
-# requests: 128Mi. Strategic merge patch won't clear old requests field,
-# so we set requests explicitly. Can be removed once the old ReplicaSet is gone.
+# Per-component infrastructure overrides.
+#
+# Two distinct motivations grouped here:
+#
+#  1. Resource hygiene transition (`product-catalog`) — preserved from the
+#     prior `requests: 128Mi → 20Mi` move; strategic merge patch can't clear
+#     the old request, so we set both requests + limits explicitly until the
+#     old ReplicaSet is gone.
+#
+#  2. Wire k8s probes + CPU limits so the otel-demo feature flags that
+#     SIMULATE problems can actually MANIFEST as k8s-visible signals. The
+#     application code respects these flags (e.g. cart's gRPC health check
+#     reads `failedReadinessProbe`; ad burns CPU on `adHighCpu`), but with
+#     no probe wired and no CPU limit set, the resulting failures stay
+#     invisible to k8s — no `Unhealthy` event, no throttling metric. The
+#     monitoring stack can't surface what k8s never observes. These additions
+#     close that gap for the matrix scenarios we measured.
 components:
   product-catalog:
     resources:
@@ -125,6 +139,24 @@ components:
         memory: 20Mi
       limits:
         memory: 20Mi
+  cart:
+    imageOverride:
+      repository: ghcr.io/nudgebee/opentelemetry-demo
+      tag: latest-cart
+      pullPolicy: Always
+    readinessProbe:
+      httpGet:
+        path: /healthz
+        port: 8080
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      failureThreshold: 3
+
+  # ad — set a CPU limit so `adHighCpu` produces throttling metrics.
+  # Without a limit, the flag's CPU burn just consumes node CPU and the
+  # kubelet emits no `container_cpu_cfs_throttled_*` series. 120m gives
+  # the demo headroom under normal load and gets throttled hard under
+  # the flag's busy-loop.
   ad:
     resources:
       requests:
@@ -133,3 +165,30 @@ components:
       limits:
         cpu: 120m
         memory: 360Mi
+
+  # recommendation — CPU limit + tighter memory so
+  # `recommendationCacheFailure` triggers OOM in a reasonable soak window
+  # under demo-shaped traffic. The cache leak grows exponentially (1.4× per
+  # 50% of requests); current 500Mi limit + low locust traffic means OOM
+  # takes 30+ min. Tightening to 250Mi keeps the leak scenario actionable
+  # without affecting steady-state.
+  recommendation:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 250Mi
+      limits:
+        cpu: 200m
+        memory: 250Mi
+
+  # email — CPU limit + slightly tighter memory. Leak code only runs per
+  # request, so under low demo traffic the OOM signal is slow regardless;
+  # keeping the limit modest at least makes the metric series exist.
+  email:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 100Mi
+      limits:
+        cpu: 100m
+        memory: 100Mi

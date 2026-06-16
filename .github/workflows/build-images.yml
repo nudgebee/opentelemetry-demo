@@ -16,5 +16,8 @@ jobs:
     permissions:
       contents: read
       packages: write
-    if: ${{ !github.event.repository.fork }}
     uses: ./.github/workflows/component-build-images.yml
+    with:
+      push: ${{ github.ref == 'refs/heads/main' }}
+      version: latest
+      ghcr_repo: ghcr.io/nudgebee/opentelemetry-demo
