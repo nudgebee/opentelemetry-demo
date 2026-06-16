@@ -14,14 +14,9 @@ on:
         default: 'dev'
         required: false
         type: string
-      dockerhub_repo:
-        description: Docker Hub repository
-        default: 'otel/demo'
-        required: false
-        type: string
       ghcr_repo:
         description: GHCR repository
-        default: 'ghcr.io/open-telemetry/demo'
+        default: 'ghcr.io/nudgebee/opentelemetry-demo'
         required: false
         type: string
 
@@ -188,13 +183,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
-        if: ${{ inputs.push && !github.event.repository.fork }}
-      - name: Log in to Docker Hub
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121  # v4.1.0
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-        if: ${{ inputs.push && !github.event.repository.fork }}
+        if: ${{ inputs.push }}
       - name: Set up QEMU
         if: ${{ matrix.file_tag.setup-qemu }}
         uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a  # v4.0.0
@@ -213,15 +202,13 @@ jobs:
           context: ${{ matrix.file_tag.context }}
           file: ${{ matrix.file_tag.file }}
           platforms: linux/amd64,linux/arm64
-          push: ${{ inputs.push && !github.event.repository.fork }}
+          push: ${{ inputs.push }}
           build-args: |
             OTEL_JAVA_AGENT_VERSION=${{ env.OTEL_JAVA_AGENT_VERSION }}
             OPENTELEMETRY_CPP_VERSION=${{ env.OPENTELEMETRY_CPP_VERSION }}
             TRACETEST_IMAGE_VERSION=${{ env.TRACETEST_IMAGE_VERSION }}
             OPENSEARCH_IMAGE=${{ env.OPENSEARCH_IMAGE }}
           tags: |
-            ${{ inputs.dockerhub_repo }}:${{ inputs.version }}-${{matrix.file_tag.tag_suffix }}
-            ${{ inputs.dockerhub_repo }}:latest-${{matrix.file_tag.tag_suffix }}
             ${{ inputs.ghcr_repo }}:${{ inputs.version }}-${{ matrix.file_tag.tag_suffix }}
             ${{ inputs.ghcr_repo }}:latest-${{ matrix.file_tag.tag_suffix }}
           cache-from: type=gha

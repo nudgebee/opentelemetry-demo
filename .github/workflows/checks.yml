@@ -101,13 +101,24 @@ jobs:
       should_build: ${{ steps.filter.outputs.react_native }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-      - uses: dorny/paths-filter@v4
-        id: filter
         with:
-          filters: |
-            react_native:
-              - 'src/react-native-app/**'
-              - '.github/workflows/**'
+          fetch-depth: 0
+      - id: filter
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ -n "${BASE_SHA}" ]; then
+            CHANGED=$(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")
+          else
+            CHANGED=$(git diff --name-only "${HEAD_SHA}^" "${HEAD_SHA}" 2>/dev/null || true)
+          fi
+          if echo "${CHANGED}" | grep -E '^(src/react-native-app/|\.github/workflows/)' >/dev/null; then
+            echo "react_native=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "react_native=false" >> "$GITHUB_OUTPUT"
+          fi
 
   react-native-android:
     needs: check-react-native-changes
