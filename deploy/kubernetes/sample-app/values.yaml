@@ -129,6 +129,7 @@ components:
     resources:
       requests:
         cpu: 120m
+        memory: 360Mi
       limits:
         cpu: 120m
         memory: 360Mi
