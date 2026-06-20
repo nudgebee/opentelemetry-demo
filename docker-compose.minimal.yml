@@ -521,7 +521,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 50M
+          memory: 505Mi               # Rightsizing recommendation (PR #272) suggests 505Mi memory limit for stability.
     restart: unless-stopped
     ports:
       - "${RECOMMENDATION_PORT}"

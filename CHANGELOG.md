@@ -7,6 +7,9 @@ the release.
 
 ## Unreleased
 
+* [kubernetes] Apply resource rightsizing recommendations for recommendation service
+  ([#272](https://github.com/nudgebee/opentelemetry-demo/pull/272))
+
 * [recommendation] Fix `recommendationCacheFailure` feature flag by
   using `ListProducts` instead of `GetProduct`
   ([#3260](https://github.com/open-telemetry/opentelemetry-demo/pull/3260))

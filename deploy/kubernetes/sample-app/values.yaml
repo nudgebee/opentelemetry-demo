@@ -177,20 +177,16 @@ components:
         cpu: 200m
         memory: 300Mi
 
-  # recommendation — CPU limit + tighter memory so
-  # `recommendationCacheFailure` triggers OOM in a reasonable soak window
-  # under demo-shaped traffic. The cache leak grows exponentially (1.4× per
-  # 50% of requests); current 500Mi limit + low locust traffic means OOM
-  # takes 30+ min. Tightening to 250Mi keeps the leak scenario actionable
-  # without affecting steady-state.
+  # recommendation — Rightsizing recommendation (PR #272) suggests 505Mi memory
+  # limit for stability. CPU limits are omitted to prevent throttling and
+  # allow bursting.
   recommendation:
     resources:
       requests:
         cpu: 50m
-        memory: 250Mi
+        memory: 505Mi
       limits:
-        cpu: 200m
-        memory: 250Mi
+        memory: 505Mi
 
   # email — CPU limit + slightly tighter memory. Leak code only runs per
   # request, so under low demo traffic the OOM signal is slow regardless;
