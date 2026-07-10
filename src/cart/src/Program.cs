@@ -49,7 +49,7 @@ builder.Services.AddSingleton<ICartStore>(x =>
 builder.Services.AddOpenFeature(openFeatureBuilder =>
 {
     openFeatureBuilder
-        .AddProvider(_ => new FlagdProvider())
+        .AddProvider(_ => new FlagdProvider(new Uri("http://flagd:8013")))
         .AddHook<MetricsHook>()
         .AddHook<TraceEnricherHook>();
 });
