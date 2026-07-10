@@ -444,14 +444,27 @@ func (cs *checkout) prepareOrderItemsAndShippingQuoteFromCart(ctx context.Contex
 }
 
 func mustCreateClient(svcAddr string) *grpc.ClientConn {
+	retryPolicy := `{
+		"methodConfig": [{
+			"name": [{"service": ""}],
+			"waitForReady": true,
+			"retryPolicy": {
+				"MaxAttempts": 5,
+				"InitialBackoff": "0.1s",
+				"MaxBackoff": "1s",
+				"BackoffMultiplier": 2,
+				"RetryableStatusCodes": [ "UNAVAILABLE" ]
+			}
+		}]
+	}`
 	c, err := grpc.NewClient(svcAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		grpc.WithDefaultServiceConfig(retryPolicy),
 	)
 	if err != nil {
-		logger.Error(fmt.Sprintf("could not connect to %s service, err: %+v", svcAddr, err))
+		panic(err)
 	}
-
 	return c
 }
 
