@@ -16,6 +16,7 @@ exclude = [
   "^https://platform\\.openai\\.com",
   # Cloudflare-protected, returns 503 to bots
   "^https://coralogix\\.com/",
+  "^https://community\\.splunk\\.com/",
 ]
 
 exclude_path = [
