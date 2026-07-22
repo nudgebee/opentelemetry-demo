@@ -117,7 +117,7 @@ jaeger:
 
 # Per-component infrastructure overrides.
 #
-# Two distinct motivations grouped here:
+# Three distinct motivations grouped here:
 #
 #  1. Resource hygiene transition (`product-catalog`) — preserved from the
 #     prior `requests: 128Mi → 20Mi` move; strategic merge patch can't clear
@@ -132,7 +132,74 @@ jaeger:
 #     invisible to k8s — no `Unhealthy` event, no throttling metric. The
 #     monitoring stack can't surface what k8s never observes. These additions
 #     close that gap for the matrix scenarios we measured.
+#
+#  3. Ship this fork's own feature flags (`flagd`) so the postgres scenarios
+#     are part of the installable pack instead of a manual cluster patch.
 components:
+  # flagd — seed the live flag file with this fork's postgres fault-injection
+  # flags, so they survive ArgoCD syncs and ship with the pack.
+  #
+  # Why this is done in an init container rather than as flag files: the chart
+  # builds the `flagd-config` ConfigMap from files bundled INSIDE the chart
+  # (`(.Files.Glob "flagd/*.json").AsConfig`), so no values override can add a
+  # flag there, and the ConfigMap name is fixed — a second ConfigMap would just
+  # collide. The init container that seeds flagd's writable copy IS values-driven,
+  # so we inject there. The flags land in the same `/config-rw/demo.flagd.json`
+  # that flagd-ui edits, so they stay toggleable from the UI like the built-ins.
+  # Without this they existed only as a hand-patched ConfigMap that any sync wiped.
+  #
+  # `sed r` appends after the `"flags": {` line, leaving the chart's own flags
+  # authoritative — new upstream flags flow through untouched. Injection is
+  # skipped when the source already defines the flags, so the step stays
+  # idempotent and never emits duplicate JSON keys. The greps fail the init
+  # container loudly if that anchor ever changes, rather than silently starting
+  # flagd without the postgres flags.
+  flagd:
+    initContainers:
+      - name: init-config
+        # Pinned rather than the chart default's floating `busybox`, so the
+        # flag-seeding step stays reproducible across deploys.
+        image: busybox:1.36.1
+        command:
+          - sh
+          - -c
+          - |
+            cat > /tmp/postgres-flags.json <<'FLAGS'
+                "postgresFailure": {
+                  "description": "Make the product-catalog PostgreSQL dependency unavailable - every product query fails, driving a gRPC error rate with the failing DB span visible in traces",
+                  "state": "ENABLED",
+                  "variants": {
+                    "on": true,
+                    "off": false
+                  },
+                  "defaultVariant": "off"
+                },
+                "postgresSlow": {
+                  "description": "Add latency to every product-catalog PostgreSQL query - the variant value is the per-query delay in ms, visible as a slow DB span in traces",
+                  "state": "ENABLED",
+                  "variants": {
+                    "off": 0,
+                    "1sec": 1000,
+                    "3sec": 3000,
+                    "6sec": 6000
+                  },
+                  "defaultVariant": "off"
+                },
+            FLAGS
+            if grep -q '"postgresFailure"' /config-ro/demo.flagd.json; then
+              cp /config-ro/demo.flagd.json /config-rw/demo.flagd.json
+            else
+              sed '/"flags": {/r /tmp/postgres-flags.json' /config-ro/demo.flagd.json > /config-rw/demo.flagd.json
+            fi
+            grep -q '"postgresFailure"' /config-rw/demo.flagd.json || exit 1
+            grep -q '"postgresSlow"' /config-rw/demo.flagd.json || exit 1
+            cat /config-rw/demo.flagd.json
+        volumeMounts:
+          - mountPath: /config-ro
+            name: config-ro
+          - mountPath: /config-rw
+            name: config-rw
+
   # product-catalog — fork-built image adds the `postgresFailure` fault-injection
   # flag (stock `ghcr.io/open-telemetry/demo` has no such flag). pullPolicy Always
   # so the rolling `latest-*` tag is re-pulled on restart.
