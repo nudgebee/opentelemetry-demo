@@ -37,6 +37,17 @@
       },
       "defaultVariant": "off"
     },
+    "postgresSlow": {
+      "description": "Add latency to every product-catalog PostgreSQL query (slow-DB scenario) - the variant value is the per-query delay in ms; drives product-catalog latency with the wait visible as a slow DB span in traces",
+      "state": "ENABLED",
+      "variants": {
+        "off": 0,
+        "1sec": 1000,
+        "3sec": 3000,
+        "6sec": 6000
+      },
+      "defaultVariant": "off"
+    },
     "recommendationCacheFailure": {
       "description": "Fail recommendation service cache",
       "state": "ENABLED",

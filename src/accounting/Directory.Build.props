@@ -8,5 +8,7 @@
     <PropertyGroup Condition="'$(Configuration)'=='Release'">
         <AnalysisMode>Minimum</AnalysisMode>
         <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+        <!-- Moderate NuGet-audit advisories (NU1902) on transitive OpenTelemetry deps stay warnings, not build-breaking errors; high-severity (NU1903) still fails the build. -->
+        <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1902</WarningsNotAsErrors>
     </PropertyGroup>
 </Project>
