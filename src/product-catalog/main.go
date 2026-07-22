@@ -208,8 +208,8 @@ func main() {
 var errPostgresUnavailable = errors.New("PostgreSQL unavailable (postgresFailure feature flag enabled)")
 
 // injectPostgresFault applies the postgres fault-injection flags to a DB call:
-// postgresSlow delays the query by the configured milliseconds (a slow-DB scenario,
-// visible as a slow DB span in traces), and postgresFailure fails it outright with
+// postgresSlow makes PostgreSQL itself hold the query open for the configured
+// milliseconds, and postgresFailure fails the call outright with
 // errPostgresUnavailable. Both surface product-catalog latency/error signals that
 // NudgeBee detects, rooted at the DB layer.
 func injectPostgresFault(ctx context.Context) error {
@@ -221,12 +221,14 @@ func injectPostgresFault(ctx context.Context) error {
 		return errPostgresUnavailable
 	}
 	if d := postgresSlow.Load(); d > 0 {
-		t := time.NewTimer(time.Duration(d) * time.Millisecond)
-		defer t.Stop()
-		select {
-		case <-t.C:
-		case <-ctx.Done():
-			return ctx.Err()
+		// Sleep inside PostgreSQL rather than in this process. Delaying here would
+		// leave the database genuinely healthy — a fast DB span and flat DB latency
+		// metrics — so the "slow PostgreSQL" story would be contradicted by its own
+		// telemetry. Going through the instrumented handle makes the wait real query
+		// time, so traces show a slow DB span and db_client_operation_duration moves.
+		// ExecContext honours ctx, so a caller deadline still cancels the query.
+		if _, err := db.ExecContext(ctx, "SELECT pg_sleep($1)", float64(d)/1000.0); err != nil {
+			return err
 		}
 	}
 	return nil
