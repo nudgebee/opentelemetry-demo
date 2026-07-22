@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -54,6 +55,11 @@ var (
 	logger *slog.Logger
 	db     *sql.DB
 	reg    metric.Registration
+
+	// postgresFailure caches the postgresFailure feature flag, refreshed by
+	// startPostgresFlagWatcher, so the hot query path reads it locally instead of
+	// evaluating flagd on every request (which hammers flagd when all traffic fails).
+	postgresFailure atomic.Bool
 )
 
 func init() {
@@ -179,6 +185,10 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGKILL)
 	defer cancel()
 
+	// Cache the postgresFailure flag in the background (cancellable ctx → the goroutine
+	// stops on shutdown) so the query path never evaluates flagd per request.
+	startPostgresFlagWatcher(ctx)
+
 	go func() {
 		if err := srv.Serve(ln); err != nil {
 			logger.Error(fmt.Sprintf("Failed to serve gRPC server, err: %v", err))
@@ -200,12 +210,36 @@ var errPostgresUnavailable = errors.New("PostgreSQL unavailable (postgresFailure
 // the flag is on it returns errPostgresUnavailable, so every product query fails at
 // the DB layer — surfacing as a product-catalog gRPC error-rate (which NudgeBee
 // detects) with the fault visible as a failing DB span in traces.
-func injectPostgresFault(ctx context.Context) error {
-	client := openfeature.NewClient("productCatalog")
-	if failed, _ := client.BooleanValue(ctx, "postgresFailure", false, openfeature.EvaluationContext{}); failed {
+func injectPostgresFault() error {
+	if postgresFailure.Load() {
 		return errPostgresUnavailable
 	}
 	return nil
+}
+
+// startPostgresFlagWatcher polls the postgresFailure feature flag every 2s and
+// caches it in the postgresFailure atomic, so injectPostgresFault reads it locally
+// on the hot query path instead of evaluating flagd on every request (which hammers
+// flagd when all product-catalog traffic is failing).
+func startPostgresFlagWatcher(ctx context.Context) {
+	client := openfeature.NewClient("productCatalog")
+	refresh := func() {
+		v, _ := client.BooleanValue(ctx, "postgresFailure", false, openfeature.EvaluationContext{})
+		postgresFailure.Store(v)
+	}
+	refresh()
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				refresh()
+			}
+		}
+	}()
 }
 
 func loadProductsFromDB(ctx context.Context) ([]*pb.Product, error) {
@@ -213,7 +247,7 @@ func loadProductsFromDB(ctx context.Context) ([]*pb.Product, error) {
 		return nil, fmt.Errorf("database connection not initialized")
 	}
 
-	if err := injectPostgresFault(ctx); err != nil {
+	if err := injectPostgresFault(); err != nil {
 		return nil, err
 	}
 
@@ -242,7 +276,7 @@ func searchProductsFromDB(ctx context.Context, query string) ([]*pb.Product, err
 		return nil, fmt.Errorf("database connection not initialized")
 	}
 
-	if err := injectPostgresFault(ctx); err != nil {
+	if err := injectPostgresFault(); err != nil {
 		return nil, err
 	}
 
@@ -273,7 +307,7 @@ func getProductFromDB(ctx context.Context, productID string) (*pb.Product, error
 		return nil, fmt.Errorf("database connection not initialized")
 	}
 
-	if err := injectPostgresFault(ctx); err != nil {
+	if err := injectPostgresFault(); err != nil {
 		return nil, err
 	}
 
