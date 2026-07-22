@@ -56,10 +56,11 @@ var (
 	db     *sql.DB
 	reg    metric.Registration
 
-	// postgresFailure caches the postgresFailure feature flag, refreshed by
-	// startPostgresFlagWatcher, so the hot query path reads it locally instead of
-	// evaluating flagd on every request (which hammers flagd when all traffic fails).
+	// postgresFailure / postgresSlow cache the postgres fault-injection flags,
+	// refreshed by startPostgresFlagWatcher, so the hot query path reads them locally
+	// instead of evaluating flagd on every request (which hammers flagd under load).
 	postgresFailure atomic.Bool
+	postgresSlow    atomic.Int64 // injected per-query delay in ms (0 = off)
 )
 
 func init() {
@@ -206,26 +207,37 @@ func main() {
 // "product not found" and map it to the right gRPC status.
 var errPostgresUnavailable = errors.New("PostgreSQL unavailable (postgresFailure feature flag enabled)")
 
-// injectPostgresFault applies the postgresFailure feature flag to a DB call. When
-// the flag is on it returns errPostgresUnavailable, so every product query fails at
-// the DB layer — surfacing as a product-catalog gRPC error-rate (which NudgeBee
-// detects) with the fault visible as a failing DB span in traces.
-func injectPostgresFault() error {
+// injectPostgresFault applies the postgres fault-injection flags to a DB call:
+// postgresSlow delays the query by the configured milliseconds (a slow-DB scenario,
+// visible as a slow DB span in traces), and postgresFailure fails it outright with
+// errPostgresUnavailable. Both surface product-catalog latency/error signals that
+// NudgeBee detects, rooted at the DB layer.
+func injectPostgresFault(ctx context.Context) error {
+	if d := postgresSlow.Load(); d > 0 {
+		t := time.NewTimer(time.Duration(d) * time.Millisecond)
+		defer t.Stop()
+		select {
+		case <-t.C:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	if postgresFailure.Load() {
 		return errPostgresUnavailable
 	}
 	return nil
 }
 
-// startPostgresFlagWatcher polls the postgresFailure feature flag every 2s and
-// caches it in the postgresFailure atomic, so injectPostgresFault reads it locally
-// on the hot query path instead of evaluating flagd on every request (which hammers
-// flagd when all product-catalog traffic is failing).
+// startPostgresFlagWatcher polls the postgres fault-injection flags every 2s and
+// caches them, so injectPostgresFault reads them locally on the hot query path
+// instead of evaluating flagd on every request (which hammers flagd under load).
 func startPostgresFlagWatcher(ctx context.Context) {
 	client := openfeature.NewClient("productCatalog")
 	refresh := func() {
-		v, _ := client.BooleanValue(ctx, "postgresFailure", false, openfeature.EvaluationContext{})
-		postgresFailure.Store(v)
+		f, _ := client.BooleanValue(ctx, "postgresFailure", false, openfeature.EvaluationContext{})
+		postgresFailure.Store(f)
+		d, _ := client.IntValue(ctx, "postgresSlow", 0, openfeature.EvaluationContext{})
+		postgresSlow.Store(d)
 	}
 	refresh()
 	go func() {
@@ -247,7 +259,7 @@ func loadProductsFromDB(ctx context.Context) ([]*pb.Product, error) {
 		return nil, fmt.Errorf("database connection not initialized")
 	}
 
-	if err := injectPostgresFault(); err != nil {
+	if err := injectPostgresFault(ctx); err != nil {
 		return nil, err
 	}
 
@@ -276,7 +288,7 @@ func searchProductsFromDB(ctx context.Context, query string) ([]*pb.Product, err
 		return nil, fmt.Errorf("database connection not initialized")
 	}
 
-	if err := injectPostgresFault(); err != nil {
+	if err := injectPostgresFault(ctx); err != nil {
 		return nil, err
 	}
 
@@ -307,7 +319,7 @@ func getProductFromDB(ctx context.Context, productID string) (*pb.Product, error
 		return nil, fmt.Errorf("database connection not initialized")
 	}
 
-	if err := injectPostgresFault(); err != nil {
+	if err := injectPostgresFault(ctx); err != nil {
 		return nil, err
 	}
 
