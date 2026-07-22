@@ -133,12 +133,30 @@ jaeger:
 #     monitoring stack can't surface what k8s never observes. These additions
 #     close that gap for the matrix scenarios we measured.
 components:
+  # product-catalog — fork-built image adds the `postgresFailure` fault-injection
+  # flag (stock `ghcr.io/open-telemetry/demo` has no such flag). pullPolicy Always
+  # so the rolling `latest-*` tag is re-pulled on restart.
+  #
+  # OTEL_CONFIG_FILE override: the fork's product-catalog reads this env, but the
+  # chart sets it to /otel-config.yaml while mounting the config at /otel-config.yml.
+  # Point it at the real mount so otelconf.NewSDK finds the file (the stock image
+  # ignored the env, so the mismatch was latent until now).
+  #
+  # memory bumped 20Mi → 64Mi: the fork image links the postgres driver + otelsql
+  # and needs a little more headroom to start.
   product-catalog:
+    imageOverride:
+      repository: ghcr.io/nudgebee/opentelemetry-demo
+      tag: latest-product-catalog
+      pullPolicy: Always
+    envOverrides:
+      - name: OTEL_CONFIG_FILE
+        value: /otel-config.yml
     resources:
       requests:
-        memory: 20Mi
+        memory: 32Mi
       limits:
-        memory: 20Mi
+        memory: 64Mi
 
   # cart — wire a readinessProbe so the `failedReadinessProbe` flag manifests
   # as a k8s Unhealthy event. Cart's gRPC health check already reads the flag,
