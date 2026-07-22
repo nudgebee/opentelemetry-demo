@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -190,9 +191,30 @@ func main() {
 	logger.Info("Product Catalog gRPC server stopped")
 }
 
+// errPostgresUnavailable is the fault injected by the postgresFailure feature flag.
+// It is a sentinel so callers can distinguish an injected DB outage from a genuine
+// "product not found" and map it to the right gRPC status.
+var errPostgresUnavailable = errors.New("PostgreSQL unavailable (postgresFailure feature flag enabled)")
+
+// injectPostgresFault applies the postgresFailure feature flag to a DB call. When
+// the flag is on it returns errPostgresUnavailable, so every product query fails at
+// the DB layer — surfacing as a product-catalog gRPC error-rate (which NudgeBee
+// detects) with the fault visible as a failing DB span in traces.
+func injectPostgresFault(ctx context.Context) error {
+	client := openfeature.NewClient("productCatalog")
+	if failed, _ := client.BooleanValue(ctx, "postgresFailure", false, openfeature.EvaluationContext{}); failed {
+		return errPostgresUnavailable
+	}
+	return nil
+}
+
 func loadProductsFromDB(ctx context.Context) ([]*pb.Product, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database connection not initialized")
+	}
+
+	if err := injectPostgresFault(ctx); err != nil {
+		return nil, err
 	}
 
 	// Query all products with categories
@@ -220,6 +242,10 @@ func searchProductsFromDB(ctx context.Context, query string) ([]*pb.Product, err
 		return nil, fmt.Errorf("database connection not initialized")
 	}
 
+	if err := injectPostgresFault(ctx); err != nil {
+		return nil, err
+	}
+
 	// Query products matching search query in name or description
 	searchPattern := "%" + strings.ToLower(query) + "%"
 	rows, err := db.QueryContext(ctx, `
@@ -245,6 +271,10 @@ func searchProductsFromDB(ctx context.Context, query string) ([]*pb.Product, err
 func getProductFromDB(ctx context.Context, productID string) (*pb.Product, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database connection not initialized")
+	}
+
+	if err := injectPostgresFault(ctx); err != nil {
+		return nil, err
 	}
 
 	// Query single product by ID
@@ -370,6 +400,13 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 
 	found, err := getProductFromDB(ctx, req.Id)
 	if err != nil {
+		// An injected PostgreSQL outage is a server-side failure, not a missing
+		// product — map it to Internal so it reads as a DB error, not NotFound.
+		if errors.Is(err, errPostgresUnavailable) {
+			span.SetStatus(otelcodes.Error, err.Error())
+			span.AddEvent(err.Error())
+			return nil, status.Errorf(codes.Internal, "%v", err)
+		}
 		msg := fmt.Sprintf("Product Not Found: %s", req.Id)
 		span.SetStatus(otelcodes.Error, msg)
 		span.AddEvent(msg)
