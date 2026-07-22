@@ -213,6 +213,13 @@ var errPostgresUnavailable = errors.New("PostgreSQL unavailable (postgresFailure
 // errPostgresUnavailable. Both surface product-catalog latency/error signals that
 // NudgeBee detects, rooted at the DB layer.
 func injectPostgresFault(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Fail fast when the outage flag is on — no point delaying before erroring.
+	if postgresFailure.Load() {
+		return errPostgresUnavailable
+	}
 	if d := postgresSlow.Load(); d > 0 {
 		t := time.NewTimer(time.Duration(d) * time.Millisecond)
 		defer t.Stop()
@@ -221,9 +228,6 @@ func injectPostgresFault(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-	}
-	if postgresFailure.Load() {
-		return errPostgresUnavailable
 	}
 	return nil
 }
@@ -452,6 +456,14 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 			span.SetStatus(otelcodes.Error, err.Error())
 			span.AddEvent(err.Error())
 			return nil, status.Errorf(codes.Internal, "%v", err)
+		}
+		// A cancelled/timed-out request (e.g. during the postgresSlow delay) is not a
+		// missing product — preserve the real gRPC status instead of NotFound.
+		if errors.Is(err, context.Canceled) {
+			return nil, status.Errorf(codes.Canceled, "request canceled")
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, status.Errorf(codes.DeadlineExceeded, "request timed out")
 		}
 		msg := fmt.Sprintf("Product Not Found: %s", req.Id)
 		span.SetStatus(otelcodes.Error, msg)
