@@ -28,6 +28,15 @@
       },
       "defaultVariant": "off"
     },
+    "postgresFailure": {
+      "description": "Make the product-catalog PostgreSQL dependency unavailable - every product query fails (drives a product-catalog gRPC error-rate that NudgeBee detects, with the failing DB span visible in traces)",
+      "state": "ENABLED",
+      "variants": {
+        "on": true,
+        "off": false
+      },
+      "defaultVariant": "off"
+    },
     "recommendationCacheFailure": {
       "description": "Fail recommendation service cache",
       "state": "ENABLED",

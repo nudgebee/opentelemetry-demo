@@ -190,9 +190,26 @@ func main() {
 	logger.Info("Product Catalog gRPC server stopped")
 }
 
+// injectPostgresFault applies the postgres fault-injection feature flags to a DB
+// call. When postgresFailure is on it returns an error modelling the PostgreSQL
+// dependency being unavailable, so every product query fails — surfacing as a
+// product-catalog gRPC error-rate (which NudgeBee detects) with the fault visible
+// as a failing DB span in traces. postgresSlow latency injection is added here too.
+func injectPostgresFault(ctx context.Context) error {
+	client := openfeature.NewClient("productCatalog")
+	if failed, _ := client.BooleanValue(ctx, "postgresFailure", false, openfeature.EvaluationContext{}); failed {
+		return fmt.Errorf("PostgreSQL unavailable (postgresFailure feature flag enabled)")
+	}
+	return nil
+}
+
 func loadProductsFromDB(ctx context.Context) ([]*pb.Product, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database connection not initialized")
+	}
+
+	if err := injectPostgresFault(ctx); err != nil {
+		return nil, err
 	}
 
 	// Query all products with categories
@@ -220,6 +237,10 @@ func searchProductsFromDB(ctx context.Context, query string) ([]*pb.Product, err
 		return nil, fmt.Errorf("database connection not initialized")
 	}
 
+	if err := injectPostgresFault(ctx); err != nil {
+		return nil, err
+	}
+
 	// Query products matching search query in name or description
 	searchPattern := "%" + strings.ToLower(query) + "%"
 	rows, err := db.QueryContext(ctx, `
@@ -245,6 +266,10 @@ func searchProductsFromDB(ctx context.Context, query string) ([]*pb.Product, err
 func getProductFromDB(ctx context.Context, productID string) (*pb.Product, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database connection not initialized")
+	}
+
+	if err := injectPostgresFault(ctx); err != nil {
+		return nil, err
 	}
 
 	// Query single product by ID
