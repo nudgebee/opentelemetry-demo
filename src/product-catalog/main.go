@@ -155,10 +155,6 @@ func main() {
 		logger.Error(err.Error())
 	}
 
-	// Cache the postgresFailure flag in the background so the query path never
-	// evaluates flagd per request.
-	startPostgresFlagWatcher(ctx)
-
 	err = runtime.Start(runtime.WithMinimumReadMemStatsInterval(time.Second))
 	if err != nil {
 		logger.Error(err.Error())
@@ -188,6 +184,10 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGKILL)
 	defer cancel()
+
+	// Cache the postgresFailure flag in the background (cancellable ctx → the goroutine
+	// stops on shutdown) so the query path never evaluates flagd per request.
+	startPostgresFlagWatcher(ctx)
 
 	go func() {
 		if err := srv.Serve(ln); err != nil {
