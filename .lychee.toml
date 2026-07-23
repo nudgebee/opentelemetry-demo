@@ -16,6 +16,7 @@ exclude = [
   "^https://platform\\.openai\\.com",
   # Cloudflare-protected, returns 503 to bots
   "^https://coralogix\\.com/",
+  # Splunk community forum returns 403 to bots (link is valid in a browser)
   "^https://community\\.splunk\\.com/",
 ]
 

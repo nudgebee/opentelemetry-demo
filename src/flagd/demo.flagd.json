@@ -28,6 +28,26 @@
       },
       "defaultVariant": "off"
     },
+    "postgresFailure": {
+      "description": "Make the product-catalog PostgreSQL dependency unavailable - every product query fails fast, driving a gRPC error rate that cascades to its callers",
+      "state": "ENABLED",
+      "variants": {
+        "on": true,
+        "off": false
+      },
+      "defaultVariant": "off"
+    },
+    "postgresSlow": {
+      "description": "Make every product-catalog PostgreSQL query genuinely slow via pg_sleep - variant value is the per-query delay in ms, visible as a slow DB span in traces",
+      "state": "ENABLED",
+      "variants": {
+        "off": 0,
+        "1sec": 1000,
+        "3sec": 3000,
+        "6sec": 6000
+      },
+      "defaultVariant": "off"
+    },
     "recommendationCacheFailure": {
       "description": "Fail recommendation service cache",
       "state": "ENABLED",

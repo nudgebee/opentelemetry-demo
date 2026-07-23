@@ -9,12 +9,14 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"os"
 	"os/signal"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -53,6 +55,12 @@ var (
 	logger *slog.Logger
 	db     *sql.DB
 	reg    metric.Registration
+
+	// postgresFailure / postgresSlow cache the postgres fault-injection flags,
+	// refreshed by startPostgresFlagWatcher, so the hot query path reads them locally
+	// instead of evaluating flagd on every request (which hammers flagd under load).
+	postgresFailure atomic.Bool
+	postgresSlow    atomic.Int64 // injected per-query delay in ms (0 = off)
 )
 
 func init() {
@@ -178,6 +186,10 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGKILL)
 	defer cancel()
 
+	// Cache the postgresFailure flag in the background (cancellable ctx → the goroutine
+	// stops on shutdown) so the query path never evaluates flagd per request.
+	startPostgresFlagWatcher(ctx)
+
 	go func() {
 		if err := srv.Serve(ln); err != nil {
 			logger.Error(fmt.Sprintf("Failed to serve gRPC server, err: %v", err))
@@ -190,9 +202,71 @@ func main() {
 	logger.Info("Product Catalog gRPC server stopped")
 }
 
+// errPostgresUnavailable is the fault injected by the postgresFailure feature flag.
+// It is a sentinel so callers can distinguish an injected DB outage from a genuine
+// "product not found" and map it to the right gRPC status.
+var errPostgresUnavailable = errors.New("PostgreSQL unavailable (postgresFailure feature flag enabled)")
+
+// injectPostgresFault applies the postgres fault-injection flags to a DB call:
+// postgresSlow makes PostgreSQL itself hold the query open for the configured
+// milliseconds, and postgresFailure fails the call outright with
+// errPostgresUnavailable. Both surface product-catalog latency/error signals that
+// NudgeBee detects, rooted at the DB layer.
+func injectPostgresFault(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Fail fast when the outage flag is on — no point delaying before erroring.
+	if postgresFailure.Load() {
+		return errPostgresUnavailable
+	}
+	if d := postgresSlow.Load(); d > 0 {
+		// Sleep inside PostgreSQL rather than in this process. Delaying here would
+		// leave the database genuinely healthy — a fast DB span and flat DB latency
+		// metrics — so the "slow PostgreSQL" story would be contradicted by its own
+		// telemetry. Going through the instrumented handle makes the wait real query
+		// time, so traces show a slow DB span and db_client_operation_duration moves.
+		// ExecContext honours ctx, so a caller deadline still cancels the query.
+		if _, err := db.ExecContext(ctx, "SELECT pg_sleep($1)", float64(d)/1000.0); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// startPostgresFlagWatcher polls the postgres fault-injection flags every 2s and
+// caches them, so injectPostgresFault reads them locally on the hot query path
+// instead of evaluating flagd on every request (which hammers flagd under load).
+func startPostgresFlagWatcher(ctx context.Context) {
+	client := openfeature.NewClient("productCatalog")
+	refresh := func() {
+		f, _ := client.BooleanValue(ctx, "postgresFailure", false, openfeature.EvaluationContext{})
+		postgresFailure.Store(f)
+		d, _ := client.IntValue(ctx, "postgresSlow", 0, openfeature.EvaluationContext{})
+		postgresSlow.Store(d)
+	}
+	refresh()
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				refresh()
+			}
+		}
+	}()
+}
+
 func loadProductsFromDB(ctx context.Context) ([]*pb.Product, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database connection not initialized")
+	}
+
+	if err := injectPostgresFault(ctx); err != nil {
+		return nil, err
 	}
 
 	// Query all products with categories
@@ -220,6 +294,10 @@ func searchProductsFromDB(ctx context.Context, query string) ([]*pb.Product, err
 		return nil, fmt.Errorf("database connection not initialized")
 	}
 
+	if err := injectPostgresFault(ctx); err != nil {
+		return nil, err
+	}
+
 	// Query products matching search query in name or description
 	searchPattern := "%" + strings.ToLower(query) + "%"
 	rows, err := db.QueryContext(ctx, `
@@ -245,6 +323,10 @@ func searchProductsFromDB(ctx context.Context, query string) ([]*pb.Product, err
 func getProductFromDB(ctx context.Context, productID string) (*pb.Product, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database connection not initialized")
+	}
+
+	if err := injectPostgresFault(ctx); err != nil {
+		return nil, err
 	}
 
 	// Query single product by ID
@@ -370,6 +452,21 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 
 	found, err := getProductFromDB(ctx, req.Id)
 	if err != nil {
+		// An injected PostgreSQL outage is a server-side failure, not a missing
+		// product — map it to Internal so it reads as a DB error, not NotFound.
+		if errors.Is(err, errPostgresUnavailable) {
+			span.SetStatus(otelcodes.Error, err.Error())
+			span.AddEvent(err.Error())
+			return nil, status.Errorf(codes.Internal, "%v", err)
+		}
+		// A cancelled/timed-out request (e.g. during the postgresSlow delay) is not a
+		// missing product — preserve the real gRPC status instead of NotFound.
+		if errors.Is(err, context.Canceled) {
+			return nil, status.Errorf(codes.Canceled, "request canceled")
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, status.Errorf(codes.DeadlineExceeded, "request timed out")
+		}
 		msg := fmt.Sprintf("Product Not Found: %s", req.Id)
 		span.SetStatus(otelcodes.Error, msg)
 		span.AddEvent(msg)
