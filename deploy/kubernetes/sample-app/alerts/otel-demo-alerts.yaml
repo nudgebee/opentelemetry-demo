@@ -106,3 +106,45 @@ spec:
       for: 5m
       labels:
         severity: critical
+    # Same signal as OtelDemoGRPCErrorRate above, for services instrumented
+    # against newer semantic conventions.
+    #
+    # OpenTelemetry renamed rpc.server.duration to rpc.server.call.duration and
+    # changed the status attribute from rpc.grpc.status_code (numeric, "0" = ok)
+    # to rpc.response.status_code (string, "OK"). Services therefore split across
+    # two metric names with incompatible labels: ad and checkout still emit
+    # rpc_server_duration, while product-catalog emits rpc_server_call_duration.
+    #
+    # The rule above matches only the older name, so product-catalog - the
+    # service most demo scenarios fault - could never raise a server-side error
+    # alert. Its failures showed up solely as client errors on checkout, leaving
+    # the failing service itself silent and giving correlation no alert on the
+    # actual root.
+    #
+    # Kept as a separate rule rather than folded into the one above because the
+    # label sets are not compatible: there is no rpc_service label here, the full
+    # "Service/Method" lives in rpc_method, and the error filter is a different
+    # attribute with different values.
+    - alert: OtelDemoGRPCServerErrorRate
+      annotations:
+        description: |-
+          gRPC server error rate exceeded 1%.
+          Service: {{ $labels.service_name }}
+          Method: {{ $labels.rpc_method }}
+          Deployment: {{ $labels.k8s_deployment_name }}
+          Pod: {{ $labels.pod }}
+          Error Rate: {{ $value | humanizePercentage }}
+        summary: High gRPC server error rate for {{ $labels.service_name }} {{ $labels.rpc_method }} in demo namespace
+      expr: |-
+        (
+          sum by (service_name, k8s_deployment_name, pod, namespace, rpc_method) (
+            rate(rpc_server_call_duration_count{namespace="demo", rpc_response_status_code!="OK"}[5m])
+          )
+          /
+          sum by (service_name, k8s_deployment_name, pod, namespace, rpc_method) (
+            rate(rpc_server_call_duration_count{namespace="demo"}[5m])
+          )
+        ) > 0.01
+      for: 5m
+      labels:
+        severity: critical
