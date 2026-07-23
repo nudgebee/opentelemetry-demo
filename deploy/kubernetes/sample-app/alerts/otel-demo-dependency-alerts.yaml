@@ -1,0 +1,66 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: otel-demo-dependency-alerts
+  namespace: victoria
+  labels:
+    app: otel-demo
+spec:
+  groups:
+    # Dependency-layer alerting for the otel demo.
+    #
+    # The rules in otel-demo-alerts.yaml are all symptom rules: HTTP/gRPC error
+    # rates and HTTP latency at service boundaries. That means a degraded
+    # dependency only ever alerts on its *callers* - the root cause itself never
+    # raises anything, so correlation has no parent to point at and a "slow
+    # database" incident presents as N slow services with no stated cause.
+    #
+    # This group alerts on the dependency itself, so the root has its own signal.
+    - name: otel-demo-postgres
+      interval: 15s
+      rules:
+        # Fires on genuinely slow PostgreSQL, measured client-side from the
+        # instrumented DB handle, so it is the database call that is slow rather
+        # than the service around it.
+        #
+        # Deliberately the mean (sum/count) and NOT histogram_quantile: the
+        # exported bucket boundaries for this metric are 0,5,10,...,10000 while
+        # the recorded values are in SECONDS, so every observation - 1ms or 1s -
+        # falls in the first (0,5] bucket. histogram_quantile then interpolates
+        # to a constant 0.95*5 = 4.75 whether the database is healthy or slow,
+        # which makes any quantile rule on this metric fire permanently and never
+        # resolve. The mean separates cleanly instead: ~0.001s healthy vs ~0.21s
+        # under the postgresSlow scenario.
+        #
+        # 100ms is ~70-250x the observed healthy mean (0.0004-0.0014s), so it is
+        # far outside normal variance while still catching real degradation.
+        #
+        # Grouped by service/deployment/namespace so the alert resolves to a k8s
+        # subject, and by db_system_name so the alert names the dependency.
+        # A zero query rate yields 0/0 = NaN, which fails the comparison, so an
+        # idle service cannot false-fire.
+        - alert: OtelDemoPostgresQueryLatencyHigh
+          expr: |
+            (
+              sum by (service_name, k8s_deployment_name, namespace, db_system_name) (
+                rate(db_client_operation_duration_sum{namespace="demo"}[5m])
+              )
+              /
+              sum by (service_name, k8s_deployment_name, namespace, db_system_name) (
+                rate(db_client_operation_duration_count{namespace="demo"}[5m])
+              )
+            ) > 0.1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Slow PostgreSQL queries from {{ $labels.service_name }} in demo namespace
+            description: |
+              Mean PostgreSQL query time exceeded 100ms.
+              Service: {{ $labels.service_name }}
+              Database: {{ $labels.db_system_name }}
+              Deployment: {{ $labels.k8s_deployment_name }}
+              Mean query time: {{ $value }}s
