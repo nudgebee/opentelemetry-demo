@@ -229,12 +229,18 @@ components:
   # as a k8s Unhealthy event. Cart's gRPC health check already reads the flag,
   # but the chart's values.schema.json only accepts `httpGet` probes. To bridge
   # that, Program.cs adds an HTTP `/healthz` endpoint backed by the same
-  # `readinessCheck` instance, served on cart's existing Kestrel port (8080
-  # by default, multiplexed with gRPC over h2c). httpGet here points at it.
+  # `readinessCheck` instance.
+  #
+  # The probe points at 8081, NOT cart's gRPC port. Cart's main port is
+  # cleartext h2c and must stay HTTP/2 only: there is no ALPN to negotiate
+  # with, so allowing HTTP/1.1 on it stops h2c clients connecting at all. Since
+  # kubernetes httpGet probes speak HTTP/1.1, Program.cs binds a second
+  # HTTP/1.1-only listener on 8081 purely for this probe, leaving the gRPC
+  # listener untouched.
   #
   # imageOverride points at the fork-built image (ghcr.io/nudgebee/opentelemetry-demo)
-  # because /healthz was added in this fork; upstream `ghcr.io/open-telemetry/demo`
-  # has no such endpoint and the probe would 404 on every poll.
+  # because /healthz and the second listener were added in this fork; upstream
+  # `ghcr.io/open-telemetry/demo` has neither and the probe would never succeed.
   cart:
     imageOverride:
       repository: ghcr.io/nudgebee/opentelemetry-demo
@@ -243,7 +249,7 @@ components:
     readinessProbe:
       httpGet:
         path: /healthz
-        port: 8080
+        port: 8081
       initialDelaySeconds: 5
       periodSeconds: 10
       failureThreshold: 3
