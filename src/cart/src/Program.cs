@@ -27,7 +27,7 @@ using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using OpenFeature;
 using OpenFeature.Hooks;
-using OpenFeature.Providers.Flagd;
+using OpenFeature.Contrib.Providers.Flagd;
 
 var builder = WebApplication.CreateBuilder(args);
 string valkeyAddress = builder.Configuration["VALKEY_ADDR"];
@@ -68,10 +68,24 @@ builder.Services.AddSingleton<ICartStore>(x =>
     return store;
 });
 
+// Pinned to the flagd provider that matches the deployed flagd server.
+//
+// The fork had moved to OpenFeature.Providers.Flagd 0.6.0, which evaluates
+// nothing against this flagd and silently returns each flag's default - no
+// connection error, no log line, flags simply never take effect. That made
+// failedReadinessProbe impossible to demonstrate: flagd served the flag as
+// true while cart's /healthz stayed 200. Passing an explicit URI did not help,
+// because the address was never the problem.
+//
+// This is the same failure product-catalog hit, and the same fix: use the
+// provider version the demo's flagd is known to work with rather than the
+// newest one. AddHostedFeatureLifecycle is required here to initialise the
+// provider at startup.
 builder.Services.AddOpenFeature(openFeatureBuilder =>
 {
     openFeatureBuilder
-        .AddProvider(_ => new FlagdProvider(new Uri("http://flagd:8013")))
+        .AddHostedFeatureLifecycle()
+        .AddProvider(_ => new FlagdProvider())
         .AddHook<MetricsHook>()
         .AddHook<TraceEnricherHook>();
 });
