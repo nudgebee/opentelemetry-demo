@@ -1,18 +1,6 @@
 # Copyright The OpenTelemetry Authors
 # SPDX-License-Identifier: Apache-2.0
-#
-# Alert rules for the otel-demo sample-app. Defined as a PrometheusRule
-# (prometheus-operator CRD) so the same manifest works against any
-# Prometheus-Operator-compatible stack: vanilla kube-prometheus-stack,
-# victoria-metrics-k8s-stack (the operator converts PrometheusRule into
-# its internal VMRule shape automatically), and other compatible operators.
-#
-# Expressions use standard PromQL only — no MetricsQL extensions — so the
-# rules evaluate identically against Prometheus, Mimir, Thanos, and
-# VictoriaMetrics backends.
-#
-# Scoped to namespace="demo"; adjust the selector if the demo is deployed
-# elsewhere.
+
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -22,102 +10,147 @@ metadata:
     app: otel-demo
 spec:
   groups:
-    - name: otel-demo-http-errors
-      interval: 15s
-      rules:
-        - alert: OtelDemoHTTPErrorRate
-          expr: |-
-            (
-              sum by (service_name, http_route, k8s_deployment_name, pod, namespace) (
-                rate(http_server_request_duration_count{namespace="demo", http_response_status_code=~"5.."}[5m])
-              )
-              /
-              sum by (service_name, http_route, k8s_deployment_name, pod, namespace) (
-                rate(http_server_request_duration_count{namespace="demo"}[5m])
-              )
-            ) > 0.01
-          for: 5m
-          labels:
-            severity: critical
-          annotations:
-            summary: High HTTP error rate for {{ $labels.service_name }} {{ $labels.http_route }} in demo namespace
-            description: |-
-              HTTP 5xx error rate exceeded 1%.
-              Service: {{ $labels.service_name }}
-              Route: {{ $labels.http_route }}
-              Deployment: {{ $labels.k8s_deployment_name }}
-              Pod: {{ $labels.pod }}
-              Error Rate: {{ $value | humanizePercentage }}
-
-        - alert: OtelDemoHighLatency
-          expr: |-
-            (
-              histogram_quantile(0.95,
-                sum by (service_name, http_route, k8s_deployment_name, pod, namespace, le) (
-                  rate(http_server_request_duration_bucket{namespace="demo"}[5m])
-                )
-              )
-            ) > 5
-          for: 5m
-          labels:
-            severity: warning
-          annotations:
-            summary: High P95 latency for {{ $labels.service_name }} {{ $labels.http_route }} in demo namespace
-            description: |-
-              P95 latency exceeded 5 seconds.
-              Service: {{ $labels.service_name }}
-              Route: {{ $labels.http_route }}
-              Deployment: {{ $labels.k8s_deployment_name }}
-              Pod: {{ $labels.pod }}
-              P95 Latency: {{ $value | humanizeDuration }}
-
-    - name: otel-demo-grpc-errors
-      interval: 15s
-      rules:
-        - alert: OtelDemoGRPCErrorRate
-          expr: |-
-            (
-              sum by (service_name, rpc_service, rpc_method, k8s_deployment_name, pod, namespace) (
-                rate(rpc_server_duration_count{namespace="demo", rpc_grpc_status_code!="0"}[5m])
-              )
-              /
-              sum by (service_name, rpc_service, rpc_method, k8s_deployment_name, pod, namespace) (
-                rate(rpc_server_duration_count{namespace="demo"}[5m])
-              )
-            ) > 0.01
-          for: 5m
-          labels:
-            severity: critical
-          annotations:
-            summary: High gRPC server error rate for {{ $labels.service_name }} {{ $labels.rpc_service }}/{{ $labels.rpc_method }} in demo namespace
-            description: |-
-              gRPC server error rate exceeded 1%.
-              Service: {{ $labels.service_name }}
-              RPC: {{ $labels.rpc_service }}/{{ $labels.rpc_method }}
-              Deployment: {{ $labels.k8s_deployment_name }}
-              Pod: {{ $labels.pod }}
-              Error Rate: {{ $value | humanizePercentage }}
-
-        - alert: OtelDemoGRPCClientErrorRate
-          expr: |-
-            (
-              sum by (service_name, k8s_deployment_name, pod, namespace, rpc_service, rpc_method) (
-                rate(rpc_client_duration_count{namespace="demo", rpc_grpc_status_code!="0"}[5m])
-              )
-              /
-              sum by (service_name, k8s_deployment_name, pod, namespace, rpc_service, rpc_method) (
-                rate(rpc_client_duration_count{namespace="demo"}[5m])
-              )
-            ) > 0.05
-          for: 5m
-          labels:
-            severity: critical
-          annotations:
-            summary: High gRPC client error rate from {{ $labels.service_name }} calling {{ $labels.rpc_service }}/{{ $labels.rpc_method }}
-            description: |-
-              gRPC client error rate exceeded 5% when calling downstream service.
-              Caller: {{ $labels.service_name }}
-              Target: {{ $labels.rpc_service }}/{{ $labels.rpc_method }}
-              Deployment: {{ $labels.k8s_deployment_name }}
-              Pod: {{ $labels.pod }}
-              Error Rate: {{ $value | humanizePercentage }}
+  - interval: 15s
+    name: otel-demo-http-errors
+    rules:
+    - alert: OtelDemoHTTPErrorRate
+      annotations:
+        description: |-
+          HTTP 5xx error rate exceeded 1%.
+          Service: {{ $labels.service_name }}
+          Route: {{ $labels.http_route }}
+          Deployment: {{ $labels.k8s_deployment_name }}
+          Pod: {{ $labels.pod }}
+          Error Rate: {{ $value | humanizePercentage }}
+        summary: High HTTP error rate for {{ $labels.service_name }} {{ $labels.http_route }} in demo namespace
+      expr: |-
+        (
+          sum by (service_name, http_route, k8s_deployment_name, pod, namespace) (
+            rate(http_server_request_duration_count{namespace="demo", http_response_status_code=~"5.."}[5m])
+          )
+          /
+          sum by (service_name, http_route, k8s_deployment_name, pod, namespace) (
+            rate(http_server_request_duration_count{namespace="demo"}[5m])
+          )
+        ) > 0.01
+      for: 5m
+      labels:
+        severity: critical
+    - alert: OtelDemoHighLatency
+      annotations:
+        description: |-
+          P95 latency exceeded 5 seconds.
+          Service: {{ $labels.service_name }}
+          Route: {{ $labels.http_route }}
+          Deployment: {{ $labels.k8s_deployment_name }}
+          Pod: {{ $labels.pod }}
+          P95 Latency: {{ $value | humanizeDuration }}
+        summary: High P95 latency for {{ $labels.service_name }} {{ $labels.http_route }} in demo namespace
+      expr: |-
+        (
+          histogram_quantile(0.95,
+            sum by (service_name, http_route, k8s_deployment_name, pod, namespace, le) (
+              rate(http_server_request_duration_bucket{namespace="demo"}[5m])
+            )
+          )
+        ) > 5
+      for: 5m
+      labels:
+        severity: warning
+  - interval: 15s
+    name: otel-demo-grpc-errors
+    rules:
+    - alert: OtelDemoGRPCErrorRate
+      annotations:
+        description: |-
+          gRPC server error rate exceeded 1%.
+          Service: {{ $labels.service_name }}
+          RPC: {{ $labels.rpc_service }}/{{ $labels.rpc_method }}
+          Deployment: {{ $labels.k8s_deployment_name }}
+          Pod: {{ $labels.pod }}
+          Error Rate: {{ $value | humanizePercentage }}
+        summary: High gRPC server error rate for {{ $labels.service_name }} {{ $labels.rpc_service }}/{{ $labels.rpc_method }} in demo namespace
+      expr: |-
+        (
+          sum by (service_name, rpc_service, rpc_method, k8s_deployment_name, pod, namespace) (
+            rate(rpc_server_duration_count{namespace="demo", rpc_grpc_status_code!="0"}[5m])
+          )
+          /
+          sum by (service_name, rpc_service, rpc_method, k8s_deployment_name, pod, namespace) (
+            rate(rpc_server_duration_count{namespace="demo"}[5m])
+          )
+        ) > 0.01
+      for: 5m
+      labels:
+        severity: critical
+    - alert: OtelDemoGRPCClientErrorRate
+      annotations:
+        description: |-
+          gRPC client error rate exceeded 5% when calling downstream service.
+          Caller: {{ $labels.service_name }}
+          Target: {{ $labels.rpc_service }}/{{ $labels.rpc_method }}
+          Deployment: {{ $labels.k8s_deployment_name }}
+          Pod: {{ $labels.pod }}
+          Error Rate: {{ $value | humanizePercentage }}
+        summary: High gRPC client error rate from {{ $labels.service_name }} calling {{ $labels.rpc_service }}/{{ $labels.rpc_method }}
+      expr: |-
+        (
+          sum by (service_name, k8s_deployment_name, pod, namespace, rpc_service, rpc_method) (
+            rate(rpc_client_duration_count{namespace="demo", rpc_grpc_status_code!="0"}[5m])
+          )
+          /
+          sum by (service_name, k8s_deployment_name, pod, namespace, rpc_service, rpc_method) (
+            rate(rpc_client_duration_count{namespace="demo"}[5m])
+          )
+        ) > 0.05
+      for: 5m
+      labels:
+        severity: critical
+    # Same signal as OtelDemoGRPCErrorRate above, for services instrumented
+    # against newer semantic conventions.
+    #
+    # OpenTelemetry renamed rpc.server.duration to rpc.server.call.duration and
+    # changed the status attribute from rpc.grpc.status_code (numeric, "0" = ok)
+    # to rpc.response.status_code (string, "OK"). Services therefore split across
+    # two metric names with incompatible labels: ad and checkout still emit
+    # rpc_server_duration, while product-catalog emits rpc_server_call_duration.
+    #
+    # The rule above matches only the older name, so product-catalog - the
+    # service most demo scenarios fault - could never raise a server-side error
+    # alert. Its failures showed up solely as client errors on checkout, leaving
+    # the failing service itself silent and giving correlation no alert on the
+    # actual root.
+    #
+    # Kept as a separate rule rather than folded into the one above because the
+    # label sets are not compatible: there is no rpc_service label here, the full
+    # "Service/Method" lives in rpc_method, and the error filter is a different
+    # attribute with different values.
+    #
+    # As with every rule in this file, namespace="demo" in the expression selects
+    # where the METRICS come from, which is not the same as metadata.namespace
+    # above (where this rule object lives). Installing the demo into a different
+    # namespace means updating that selector, or the rule silently matches
+    # nothing. See alerts/README.md.
+    - alert: OtelDemoGRPCServerErrorRate
+      annotations:
+        description: |-
+          gRPC server error rate exceeded 1%.
+          Service: {{ $labels.service_name }}
+          Method: {{ $labels.rpc_method }}
+          Deployment: {{ $labels.k8s_deployment_name }}
+          Pod: {{ $labels.pod }}
+          Error Rate: {{ $value | humanizePercentage }}
+        summary: High gRPC server error rate for {{ $labels.service_name }} {{ $labels.rpc_method }} in demo namespace
+      expr: |-
+        (
+          sum by (service_name, k8s_deployment_name, pod, namespace, rpc_method) (
+            rate(rpc_server_call_duration_count{namespace="demo", rpc_response_status_code!="OK"}[5m])
+          )
+          /
+          sum by (service_name, k8s_deployment_name, pod, namespace, rpc_method) (
+            rate(rpc_server_call_duration_count{namespace="demo"}[5m])
+          )
+        ) > 0.01
+      for: 5m
+      labels:
+        severity: critical

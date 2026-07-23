@@ -14,7 +14,9 @@ using cart.services;
 using cart.healthcheck;
 
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
@@ -34,6 +36,26 @@ if (string.IsNullOrEmpty(valkeyAddress))
     Console.WriteLine("VALKEY_ADDR environment variable is required.");
     Environment.Exit(1);
 }
+
+// Bind two endpoints explicitly instead of taking ASPNETCORE_URLS.
+//
+// The gRPC port stays HTTP/2 only. This is cleartext h2c, so there is no ALPN
+// to negotiate with, and switching it to Http1AndHttp2 makes h2c clients fail
+// to connect at all - every gRPC caller of cart.
+//
+// Kubernetes httpGet probes speak HTTP/1.1, so /healthz needs a plain HTTP/1.1
+// listener. Giving it a separate port leaves the gRPC listener untouched.
+//
+// This has to happen in code rather than appsettings.json: the chart sets
+// ASPNETCORE_URLS, which takes precedence over Kestrel:Endpoints configuration.
+// Calling Listen* makes Kestrel ignore ASPNETCORE_URLS and use these instead.
+builder.WebHost.ConfigureKestrel(options =>
+{
+    var cartPort = int.Parse(builder.Configuration["CART_PORT"] ?? "8080");
+    var healthPort = int.Parse(builder.Configuration["CART_HEALTH_PORT"] ?? "8081");
+    options.ListenAnyIP(cartPort, listen => listen.Protocols = HttpProtocols.Http2);
+    options.ListenAnyIP(healthPort, listen => listen.Protocols = HttpProtocols.Http1);
+});
 
 builder.Logging
     .AddOpenTelemetry(options => options.AddOtlpExporter())
