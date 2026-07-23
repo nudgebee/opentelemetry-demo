@@ -11,7 +11,7 @@ using System.Threading;
 
 using OpenFeature;
 using OpenFeature.Hooks;
-using OpenFeature.Providers.Flagd;
+using OpenFeature.Contrib.Providers.Flagd;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
