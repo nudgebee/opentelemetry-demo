@@ -125,6 +125,12 @@ spec:
     # label sets are not compatible: there is no rpc_service label here, the full
     # "Service/Method" lives in rpc_method, and the error filter is a different
     # attribute with different values.
+    #
+    # As with every rule in this file, namespace="demo" in the expression selects
+    # where the METRICS come from, which is not the same as metadata.namespace
+    # above (where this rule object lives). Installing the demo into a different
+    # namespace means updating that selector, or the rule silently matches
+    # nothing. See alerts/README.md.
     - alert: OtelDemoGRPCServerErrorRate
       annotations:
         description: |-
