@@ -28,6 +28,21 @@ operator or Prometheus watches. If the rule selector is empty it picks up
 every rule object in the namespaces it may read, so no extra labels are
 needed; otherwise match the selector.
 
+### If you deploy the demo outside the `demo` namespace
+
+Every expression filters on `namespace="demo"`, matching the namespace the
+demo itself is deployed into. That is a different namespace from the one in
+the `metadata` above: `metadata.namespace` is where the rule object lives,
+while the `namespace="demo"` selector is where the metrics come from.
+
+If you install the demo somewhere else, edit that selector in **both** files
+or the rules will silently match nothing and never fire:
+
+```bash
+grep -rl 'namespace="demo"' deploy/kubernetes/sample-app/alerts/ \
+  | xargs sed -i 's/namespace="demo"/namespace="YOUR_NAMESPACE"/g'
+```
+
 ## What is here, and why it is split in two
 
 ### Symptom rules: `otel-demo-alerts.yaml`
