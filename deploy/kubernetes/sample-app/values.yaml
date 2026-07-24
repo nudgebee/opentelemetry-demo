@@ -294,3 +294,17 @@ components:
       limits:
         cpu: 100m
         memory: 100Mi
+
+  # accounting: the chart defaults this to a 120Mi limit, but the .NET runtime
+  # sits at ~117Mi steady here (Kafka consumer + Postgres client), which leaves
+  # almost no headroom and OOMKills on every GC spike (observed ~100 restarts in
+  # 44h). This is not a leak: working-set is flat, not climbing. Give it real
+  # headroom. Both request and limit are set to the same value so the strategic
+  # merge patch never leaves a stale request above the limit (an earlier drift
+  # in exactly that shape kept this Deployment permanently OutOfSync).
+  accounting:
+    resources:
+      requests:
+        memory: 256Mi
+      limits:
+        memory: 256Mi
