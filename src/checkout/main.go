@@ -245,7 +245,7 @@ func main() {
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", port))
 	if err != nil {
-		logger.Error(err.Error())
+		panic(err)
 	}
 
 	var srv = grpc.NewServer(
@@ -255,14 +255,12 @@ func main() {
 
 	healthcheck := health.NewServer()
 	healthpb.RegisterHealthServer(srv, healthcheck)
-	logger.Info(fmt.Sprintf("starting to listen on tcp: %q", lis.Addr().String()))
-	err = srv.Serve(lis)
-	logger.Error(err.Error())
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGKILL)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
 	go func() {
+		logger.Info(fmt.Sprintf("starting to listen on tcp: %q", lis.Addr().String()))
 		if err := srv.Serve(lis); err != nil {
 			logger.Error(err.Error())
 		}
@@ -317,7 +315,7 @@ func (cs *checkout) PlaceOrder(ctx context.Context, req *pb.PlaceOrderRequest) (
 
 	prep, err := cs.prepareOrderItemsAndShippingQuoteFromCart(ctx, req.UserId, req.UserCurrency, req.Address)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, err.Error())
+		return nil, status.Errorf(codes.Internal, "%s", err.Error())
 	}
 	span.AddEvent("prepared")
 
@@ -444,14 +442,27 @@ func (cs *checkout) prepareOrderItemsAndShippingQuoteFromCart(ctx context.Contex
 }
 
 func mustCreateClient(svcAddr string) *grpc.ClientConn {
+	retryPolicy := `{
+		"methodConfig": [{
+			"name": [{"service": ""}],
+			"waitForReady": true,
+			"retryPolicy": {
+				"maxAttempts": 5,
+				"initialBackoff": "0.1s",
+				"maxBackoff": "1s",
+				"backoffMultiplier": 2,
+				"retryableStatusCodes": [ "UNAVAILABLE" ]
+			}
+		}]
+	}`
 	c, err := grpc.NewClient(svcAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		grpc.WithDefaultServiceConfig(retryPolicy),
 	)
 	if err != nil {
-		logger.Error(fmt.Sprintf("could not connect to %s service, err: %+v", svcAddr, err))
+		panic(err)
 	}
-
 	return c
 }
 

@@ -7,6 +7,8 @@ the release.
 
 ## Unreleased
 
+* [checkout] Add gRPC retry policy to checkout service client ([#417](https://github.com/nudgebee/opentelemetry-demo/pull/417))
+
 * [recommendation] Fix `recommendationCacheFailure` feature flag by
   using `ListProducts` instead of `GetProduct`
   ([#3260](https://github.com/open-telemetry/opentelemetry-demo/pull/3260))
