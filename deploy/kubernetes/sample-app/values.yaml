@@ -17,6 +17,20 @@ default:
     # Set resource attributes for service discovery and grouping
     - name: OTEL_RESOURCE_ATTRIBUTES
       value: 'service.name=$(OTEL_SERVICE_NAME),service.namespace=opentelemetry-demo,service.version={{ .Chart.AppVersion }}'
+    # Export metrics every 15s instead of the OTel SDK default of 60s.
+    #
+    # This is the dominant factor in how fast a scenario becomes visible. At the
+    # 60s default every series gets one sample per minute (verified:
+    # count_over_time(...[10m]) returned 10), so a rate() window needs minutes
+    # just to collect enough points, and no alert could fire in under ~7 min no
+    # matter how the rules were tuned. The 10s Prometheus scrape interval was
+    # irrelevant - there was simply nothing new to scrape.
+    #
+    # At 15s a 2m rate window holds ~8 samples, so the alert expressions cross
+    # their thresholds in well under a minute. Cost is 4x more metric exports,
+    # which is immaterial at demo scale.
+    - name: OTEL_METRIC_EXPORT_INTERVAL
+      value: "15000"
 
 # Disable built-in OTel Collector -- we use our external deployment collector
 # in the otel namespace which fans out to ClickHouse, VictoriaMetrics, Loki, etc.

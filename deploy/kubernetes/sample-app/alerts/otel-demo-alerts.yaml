@@ -26,14 +26,14 @@ spec:
       expr: |-
         (
           sum by (service_name, http_route, k8s_deployment_name, pod, namespace) (
-            rate(http_server_request_duration_count{namespace="demo", http_response_status_code=~"5.."}[5m])
+            rate(http_server_request_duration_count{namespace="demo", http_response_status_code=~"5.."}[2m])
           )
           /
           sum by (service_name, http_route, k8s_deployment_name, pod, namespace) (
-            rate(http_server_request_duration_count{namespace="demo"}[5m])
+            rate(http_server_request_duration_count{namespace="demo"}[2m])
           )
         ) > 0.01
-      for: 5m
+      for: 1m
       labels:
         severity: critical
     - alert: OtelDemoHighLatency
@@ -50,11 +50,11 @@ spec:
         (
           histogram_quantile(0.95,
             sum by (service_name, http_route, k8s_deployment_name, pod, namespace, le) (
-              rate(http_server_request_duration_bucket{namespace="demo"}[5m])
+              rate(http_server_request_duration_bucket{namespace="demo"}[2m])
             )
           )
         ) > 5
-      for: 5m
+      for: 1m
       labels:
         severity: warning
   - interval: 15s
@@ -73,14 +73,14 @@ spec:
       expr: |-
         (
           sum by (service_name, rpc_service, rpc_method, k8s_deployment_name, pod, namespace) (
-            rate(rpc_server_duration_count{namespace="demo", rpc_grpc_status_code!="0"}[5m])
+            rate(rpc_server_duration_count{namespace="demo", rpc_grpc_status_code!="0"}[2m])
           )
           /
           sum by (service_name, rpc_service, rpc_method, k8s_deployment_name, pod, namespace) (
-            rate(rpc_server_duration_count{namespace="demo"}[5m])
+            rate(rpc_server_duration_count{namespace="demo"}[2m])
           )
         ) > 0.01
-      for: 5m
+      for: 1m
       labels:
         severity: critical
     - alert: OtelDemoGRPCClientErrorRate
@@ -96,14 +96,14 @@ spec:
       expr: |-
         (
           sum by (service_name, k8s_deployment_name, pod, namespace, rpc_service, rpc_method) (
-            rate(rpc_client_duration_count{namespace="demo", rpc_grpc_status_code!="0"}[5m])
+            rate(rpc_client_duration_count{namespace="demo", rpc_grpc_status_code!="0"}[2m])
           )
           /
           sum by (service_name, k8s_deployment_name, pod, namespace, rpc_service, rpc_method) (
-            rate(rpc_client_duration_count{namespace="demo"}[5m])
+            rate(rpc_client_duration_count{namespace="demo"}[2m])
           )
         ) > 0.05
-      for: 5m
+      for: 1m
       labels:
         severity: critical
     # Same signal as OtelDemoGRPCErrorRate above, for services instrumented
@@ -144,13 +144,13 @@ spec:
       expr: |-
         (
           sum by (service_name, k8s_deployment_name, pod, namespace, rpc_method) (
-            rate(rpc_server_call_duration_count{namespace="demo", rpc_response_status_code!="OK"}[5m])
+            rate(rpc_server_call_duration_count{namespace="demo", rpc_response_status_code!="OK"}[2m])
           )
           /
           sum by (service_name, k8s_deployment_name, pod, namespace, rpc_method) (
-            rate(rpc_server_call_duration_count{namespace="demo"}[5m])
+            rate(rpc_server_call_duration_count{namespace="demo"}[2m])
           )
         ) > 0.01
-      for: 5m
+      for: 1m
       labels:
         severity: critical
