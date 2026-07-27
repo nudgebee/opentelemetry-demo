@@ -167,7 +167,7 @@ components:
             cat > /tmp/postgres-flags.json <<'FLAGS'
                 "postgresFailure": {
                   "description": "Make the product-catalog PostgreSQL dependency unavailable - every product query fails fast, driving a gRPC error rate that cascades to its callers",
-                  "state": "ENABLED",
+                  "state": "DISABLED",
                   "variants": {
                     "on": true,
                     "off": false

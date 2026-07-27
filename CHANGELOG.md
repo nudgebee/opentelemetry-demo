@@ -7,6 +7,8 @@ the release.
 
 ## Unreleased
 
+* [flagd] Disable `postgresFailure` feature flag by default
+  ([#445](https://github.com/nudgebee/opentelemetry-demo/pull/445))
 * [recommendation] Fix `recommendationCacheFailure` feature flag by
   using `ListProducts` instead of `GetProduct`
   ([#3260](https://github.com/open-telemetry/opentelemetry-demo/pull/3260))
