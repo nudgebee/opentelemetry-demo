@@ -46,14 +46,14 @@ spec:
           expr: |
             (
               sum by (service_name, k8s_deployment_name, namespace, db_system_name) (
-                rate(db_client_operation_duration_sum{namespace="demo"}[5m])
+                rate(db_client_operation_duration_sum{namespace="demo"}[2m])
               )
               /
               sum by (service_name, k8s_deployment_name, namespace, db_system_name) (
-                rate(db_client_operation_duration_count{namespace="demo"}[5m])
+                rate(db_client_operation_duration_count{namespace="demo"}[2m])
               )
             ) > 0.1
-          for: 5m
+          for: 1m
           labels:
             severity: critical
           annotations:
