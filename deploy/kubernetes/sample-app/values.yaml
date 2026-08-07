@@ -297,9 +297,7 @@ components:
         cpu: 200m
         memory: 250Mi
 
-  # email — CPU limit + slightly tighter memory. Leak code only runs per
-  # request, so under low demo traffic the OOM signal is slow regardless;
-  # keeping the limit modest at least makes the metric series exist.
+  # email — memory raised 100Mi -> 128Mi for post-OOM headroom.
   email:
     resources:
       requests:
