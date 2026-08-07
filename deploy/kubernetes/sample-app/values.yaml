@@ -304,10 +304,10 @@ components:
     resources:
       requests:
         cpu: 50m
-        memory: 100Mi
+        memory: 128Mi
       limits:
         cpu: 100m
-        memory: 100Mi
+        memory: 128Mi
 
   # accounting: the chart defaults this to a 120Mi limit, but the .NET runtime
   # sits at ~117Mi steady here (Kafka consumer + Postgres client), which leaves
