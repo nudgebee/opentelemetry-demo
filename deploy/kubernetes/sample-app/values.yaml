@@ -282,6 +282,14 @@ components:
         cpu: 200m
         memory: 300Mi
 
+  # kafka — cap memory to reduce node footprint
+  kafka:
+    resources:
+      requests:
+        memory: 512Mi
+      limits:
+        memory: 512Mi
+
   # recommendation — CPU limit + tighter memory so
   # `recommendationCacheFailure` triggers OOM in a reasonable soak window
   # under demo-shaped traffic. The cache leak grows exponentially (1.4× per
