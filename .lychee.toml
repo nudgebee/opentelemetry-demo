@@ -18,6 +18,8 @@ exclude = [
   "^https://coralogix\\.com/",
   # Splunk community forum returns 403 to bots (link is valid in a browser)
   "^https://community\\.splunk\\.com/",
+  # Slack links return 403 to bots
+  "^https://cloud-native\\.slack\\.com/",
 ]
 
 exclude_path = [
