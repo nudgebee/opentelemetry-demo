@@ -7,6 +7,9 @@ the release.
 
 ## Unreleased
 
+* [ad] Fix ad service failing to re-establish gRPC connection to flagd after restart
+  ([#476](https://github.com/nudgebee/opentelemetry-demo/pull/476))
+
 * [recommendation] Fix `recommendationCacheFailure` feature flag by
   using `ListProducts` instead of `GetProduct`
   ([#3260](https://github.com/open-telemetry/opentelemetry-demo/pull/3260))
