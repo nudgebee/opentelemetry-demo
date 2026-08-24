@@ -322,3 +322,17 @@ components:
         memory: 256Mi
       limits:
         memory: 256Mi
+
+  # fraud-detection: the JVM is configured with a 180MB heap, leaving only 72Mi
+  # for native memory, thread stacks, and off-heap buffers when the limit is
+  # 252Mi. This is insufficient and causes OOMKills. Increase to 512Mi to
+  # provide adequate headroom.
+  fraud-detection:
+    resources:
+      requests:
+        memory: 512Mi
+      limits:
+        memory: 512Mi
+    envOverrides:
+      - name: JAVA_TOOL_OPTIONS
+        value: "-javaagent:/usr/src/app/opentelemetry-javaagent.jar -Xmx350m"

@@ -87,6 +87,8 @@ public final class AdService {
     FlagdOptions options =
         FlagdOptions.builder()
             .withGlobalTelemetry(true)
+            .streamDeadlineMs(0)
+            .deadline(3000)
             .build();
 
     FlagdProvider flagdProvider = new FlagdProvider(options);
