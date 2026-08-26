@@ -7,7 +7,7 @@ Roughly 30 minutes end to end, most of it waiting for Helm.
 
 Everything below was measured against a live cluster, including the parts that
 do **not** work. Where a scenario produces nothing, this guide says so and says
-why — a demo that quietly fails is worse than one that plainly does.
+why -- a demo that quietly fails is worse than one that plainly does.
 
 ---
 
@@ -18,8 +18,8 @@ is a 20-service e-commerce app in nine languages, fully instrumented, with
 built-in feature flags that inject real faults: a database outage, a memory
 leak, a slow dependency, failing payments.
 
-That last part is why it is a good NudgeBee test. The failures are genuine —
-real OOM kills, real gRPC errors, real database latency — but they are
+That last part is why it is a good NudgeBee test. The failures are genuine --
+real OOM kills, real gRPC errors, real database latency -- but they are
 reproducible on demand and switch off cleanly.
 
 ---
@@ -31,7 +31,7 @@ reproducible on demand and switch off cleanly.
 | Kubernetes cluster | v1.27+, ~4 spare CPU / 8 GiB. Anything smaller and the demo itself is your bottleneck. |
 | Helm 3 | |
 | NudgeBee account | [app.nudgebee.com](https://app.nudgebee.com) or self-hosted |
-| NudgeBee agent installed | See the section below — **read the gotchas, several are silent** |
+| NudgeBee agent installed | See the section below -- **read the gotchas, several are silent** |
 
 ---
 
@@ -41,7 +41,7 @@ Follow the [agent install docs](https://docs.nudgebee.com/docs/installation/agen
 Four things bite people, all verified on a fresh install:
 
 **If you already run Prometheus, your alerts are not wired.** The docs say
-"already have Prometheus? you just need its URL" — true for metrics, which are
+"already have Prometheus? you just need its URL" -- true for metrics, which are
 *queried*, never shipped. But it also means you skipped the values file that
 configures Alertmanager, so nothing routes alerts to NudgeBee. You will need the
 receiver in [`alertmanager-receiver.yaml`](./alertmanager-receiver.yaml).
@@ -88,7 +88,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' -X POST localhost:8080/api/alerts \
 ```
 
 `202` means the path works. Separately, once Alertmanager is wired you should
-see a **`Watchdog`** event in NudgeBee — that alert exists purely to certify
+see a **`Watchdog`** event in NudgeBee -- that alert exists purely to certify
 Alertmanager delivery, so its presence is proof the pipe is healthy. Conversely
 `AlertmanagerFailedToSendAlerts` means your receiver URL is wrong.
 
@@ -105,7 +105,7 @@ helm upgrade --install otel-demo open-telemetry/opentelemetry-demo \
 
 `values.yaml` is not cosmetic. It sets CPU limits so throttling is measurable,
 tightens memory so leaks reach OOM in minutes rather than hours, wires a
-readiness probe, and drops the metric export interval from 60s to 15s — which is
+readiness probe, and drops the metric export interval from 60s to 15s -- which is
 what takes detection from ~8 minutes to ~2.5.
 
 Wait for green, then confirm the shop works:
@@ -135,7 +135,7 @@ root-cause behaviour has anything to work with.
 `ruleSelectorNilUsesHelmValues: true`, meaning Prometheus loads only rules
 labelled with its own release name. Without the label the rules apply cleanly,
 `kubectl` says `configured`, and Prometheus never loads them. Verify in
-Prometheus under **Status → Rules**, not by trusting the apply.
+Prometheus under **Status -> Rules**, not by trusting the apply.
 
 ---
 
@@ -150,7 +150,7 @@ This is what lets NudgeBee read your source code during an investigation.
 ```
 
 The commit must match the running images. A mismatched hash makes the code agent
-cite functions that do not exist in the running binary — worse than no code
+cite functions that do not exist in the running binary -- worse than no code
 analysis at all. Re-run after every `helm upgrade`; the upstream chart can only
 set pod annotations, and NudgeBee reads Deployment annotations.
 
@@ -184,7 +184,7 @@ correctly report that nothing is wrong now, having missed what already happened.
 
 Full catalogue, including what does not work, in [`scenarios.yaml`](./scenarios.yaml).
 
-### A. Database outage — root cause and blast radius
+### A. Database outage -- root cause and blast radius
 
 ```bash
 $S postgresFailure on
@@ -192,24 +192,24 @@ $S postgresFailure on
 
 Every product query fails; the storefront returns HTTP 500. About 2.5 minutes
 later, alerts fire on **product-catalog** (the cause) and **checkout** (a
-caller). Open either from **Troubleshoot → Events → Investigate**.
+caller). Open either from **Troubleshoot -> Events -> Investigate**.
 
 What the RCA gave us, unedited:
 
 > The 100% failure rate on product-catalog was caused by activation of the
-> `postgresFailure` feature flag… returning `13 INTERNAL: PostgreSQL unavailable`
+> `postgresFailure` feature flag... returning `13 INTERNAL: PostgreSQL unavailable`
 >
-> Pod CPU utilization remained negligible at ~0.001–0.002 cores, ruling out
+> Pod CPU utilization remained negligible at ~0.001-0.002 cores, ruling out
 > resource exhaustion.
 >
-> **Related Alerts Check** — checkout: *Confirmed — checkout calls product-catalog
+> **Related Alerts Check** -- checkout: *Confirmed -- checkout calls product-catalog
 > during PlaceOrder; failures cascaded to checkout starting 29 seconds later.*
 
 Note what that is doing: naming the trigger, quoting the error, actively ruling
 out a wrong hypothesis with evidence, and tying a second alert to the first with
 a measured offset.
 
-### B. Memory leak — crash analysis down to the line
+### B. Memory leak -- crash analysis down to the line
 
 ```bash
 $S emailMemoryLeak 10000x
@@ -217,14 +217,14 @@ $S loadGeneratorVUs 50          # more orders = faster leak
 ```
 
 The email service OOMKills in about 3 minutes and enters CrashLoopBackOff. This
-one needs no alert rules at all — the kernel OOM killer is the signal, so it is
+one needs no alert rules at all -- the kernel OOM killer is the signal, so it is
 the most deterministic scenario in the set.
 
 Scored **69 / P1**, and the report shows its own arithmetic:
 
-> Intrinsic Base 62 · Environment `non_prod` −8 ·
-> Blast Radius `single_workload` 0 ·
-> Correlation `likely_root_cause` +15 · Confidence 0.9
+> Intrinsic Base 62 | Environment `non_prod` -8 |
+> Blast Radius `single_workload` 0 |
+> Correlation `likely_root_cause` +15 | Confidence 0.9
 
 It also assembles the incident, correlating the CrashLoopBackOff 75 seconds later
 as *"a direct downstream failure caused by container restart loops following the
@@ -233,7 +233,7 @@ OOM kill"*.
 Do not run this together with `paymentFailure`: checkout charges the card before
 sending the confirmation email, so a payment failure starves the leak of traffic.
 
-### C. Slow dependency — the alert that names the cause
+### C. Slow dependency -- the alert that names the cause
 
 ```bash
 $S postgresSlow 6sec
@@ -246,7 +246,7 @@ This is the correlation story. Symptom rules only ever alert on a slow
 dependency's *callers*, so a slow database looks like several slow services with
 nothing naming the cause. The dependency rule closes that gap.
 
-Use `6sec` — `1sec` and `3sec` do not cross the 5s latency threshold.
+Use `6sec` -- `1sec` and `3sec` do not cross the 5s latency threshold.
 
 ---
 
@@ -254,14 +254,14 @@ Use `6sec` — `1sec` and `3sec` do not cross the 5s latency threshold.
 
 Detection is the start. The loop is:
 
-1. **Troubleshoot → Events** — filter to `ns: demo`. Alert-based events group
+1. **Troubleshoot -> Events** -- filter to `ns: demo`. Alert-based events group
    caller and callee; repeat triggers of the same scenario group into the
    existing event rather than creating a new one.
-2. **Investigate** — Root Cause, Evidence, Affected Components, Recommended
+2. **Investigate** -- Root Cause, Evidence, Affected Components, Recommended
    Actions, plus the tasks that produced them.
-3. **Ask a follow up** — this is where code analysis happens. **It is not
-   automatic.** The alert investigation runs about ten tasks — timeline, labels,
-   dependencies, metrics, traces, threshold tuning, resource check — and none of
+3. **Ask a follow up** -- this is where code analysis happens. **It is not
+   automatic.** The alert investigation runs about ten tasks -- timeline, labels,
+   dependencies, metrics, traces, threshold tuning, resource check -- and none of
    them reads source. You have to ask.
 
    Try: *"Using the annotated source repository for this workload, show me the
@@ -269,9 +269,9 @@ Detection is the start. The loop is:
 
    Nubi checks the workload's annotations, clones the repo, greps it, and reads
    the file. On our run it returned `main.go:208`, `main.go:215` and `main.go:221`
-   — all three verified correct against the real source at that commit.
+   -- all three verified correct against the real source at that commit.
 
-4. **Generate Remediation** → **Fix it** — turns the analysis into an action,
+4. **Generate Remediation** -> **Fix it** -- turns the analysis into an action,
    e.g. raising a memory limit, with approval before anything is applied.
 
 ---
@@ -286,7 +286,7 @@ first three.
 | Is the flag really served? | `scenario.sh --check <flag>` |
 | Did the fault actually happen? | `curl` the storefront, or `kubectl get pod` for OOM |
 | Can alerts reach NudgeBee? | the `curl` in step 1; look for `Watchdog` |
-| Are rules loaded? | Prometheus **Status → Rules** — not just `kubectl get prometheusrule` |
+| Are rules loaded? | Prometheus **Status -> Rules** -- not just `kubectl get prometheusrule` |
 | Is the service even instrumented? | see below |
 
 **Only `ad`, `checkout` and `product-catalog` emit gRPC server metrics.**
