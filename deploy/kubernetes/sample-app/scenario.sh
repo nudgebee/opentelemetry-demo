@@ -14,6 +14,11 @@
 #   ./scenario.sh --targeting <flag>     show the flag's targeting rule and whether
 #                                        it can ever be enabled at all
 #   ./scenario.sh --reset                turn every fault flag off
+#   ./scenario.sh --drain [PROM_URL]     reset, wait for OtelDemo alerts to
+#                                        resolve, then settle -- ALWAYS do this
+#                                        between scenarios, or the previous
+#                                        fault's traces contaminate the next
+#                                        investigation's evidence
 #
 #   --namespace NS                       demo namespace (default: demo, or $DEMO_NAMESPACE)
 #
@@ -192,6 +197,54 @@ if reach and set(reach) <= {"off"}:
     print("DEGENERATE: every branch of this rule returns off, so the flag can")
     print("never be enabled. Setting defaultVariant does nothing -- targeting wins.")
 '
+    exit 0 ;;
+
+  --drain)
+    # Reset, then wait until the previous scenario has genuinely stopped
+    # producing signal. This matters more than it sounds: an investigation
+    # reads traces from around its alert, so a fault that was erroring a
+    # minute ago lands in the NEXT scenario's evidence. We reproduced that --
+    # starting postgresSlow 80s after postgresFailure gave an investigation
+    # full of "PostgreSQL unavailable" errors that concluded
+    # "Root Cause: Undetermined". The analysis was fresh and correct about
+    # what it saw; the window was contaminated.
+    "$0" --reset || exit 1
+    echo
+
+    PROM="${2:-${PROM_URL:-}}"
+    SETTLE="${DRAIN_SETTLE:-300}"
+
+    if [ -n "$PROM" ]; then
+      echo "Waiting for OtelDemo alerts to resolve at $PROM ..."
+      Q='ALERTS{alertname=~"OtelDemo.*",alertstate="firing"}'
+      N=0
+      while [ "$N" -lt 60 ]; do
+        BODY="$(curl -sG --data-urlencode "query=$Q" "$PROM/api/v1/query" 2>/dev/null || true)"
+        COUNT="$(printf '%s' "$BODY" | python3 -c '
+import json,sys
+try: print(len(json.load(sys.stdin)["data"]["result"]))
+except Exception: print("?")
+' 2>/dev/null)"
+        case "$COUNT" in
+          0) echo "  all OtelDemo alerts resolved."; break ;;
+          '?') echo "  WARNING: could not query $PROM -- check the URL"; break ;;
+          *) echo "  $COUNT still firing; waiting..." ;;
+        esac
+        sleep 20; N=$((N+1))
+      done
+    else
+      echo "No Prometheus URL given, so alert state cannot be confirmed."
+      echo "Pass one, or set PROM_URL, to have this wait for real:"
+      echo "    $0 --drain http://localhost:9090"
+      echo
+      echo "Otherwise verify by hand that this returns nothing:"
+      echo '    ALERTS{alertname=~"OtelDemo.*", alertstate="firing"}'
+    fi
+
+    echo
+    echo "Settling for ${SETTLE}s so the trace window is clean (DRAIN_SETTLE to change)..."
+    sleep "$SETTLE"
+    echo "Drained. Safe to start the next scenario."
     exit 0 ;;
 
   --reset) FLAG="__RESET__"; VARIANT="off" ;;
