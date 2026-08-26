@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
 #
 # annotate-workloads.sh -- tell NudgeBee which source code and which infrastructure
 # repo each demo workload belongs to.
@@ -83,7 +85,7 @@ DRY_RUN="false"
 DEMO_SERVICES="accounting ad agent cart chatbot checkout currency email flagd-ui fraud-detection frontend frontend-proxy image-provider load-generator mcp opamp-server payment product-catalog quote recommendation shipping telemetry-docs"
 
 die() { echo "error: $*" >&2; exit 1; }
-usage() { sed -n '2,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//; s/^#$//' | sed '$d'; }
+usage() { sed -n '4,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//; s/^#$//' | sed '$d'; }
 
 while [ $# -gt 0 ]; do
   case "$1" in

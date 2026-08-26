@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
 #
 # apply-alerts.sh -- install the demo's alerting rules into whichever namespace
 # your Prometheus (or VictoriaMetrics) operator actually watches.
@@ -50,7 +52,7 @@ RELEASE_LABEL=""
 DRY_RUN="false"
 
 die() { echo "error: $*" >&2; exit 1; }
-usage() { sed -n '2,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//; s/^#$//' | sed '$d'; }
+usage() { sed -n '4,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//; s/^#$//' | sed '$d'; }
 
 while [ $# -gt 0 ]; do
   case "$1" in

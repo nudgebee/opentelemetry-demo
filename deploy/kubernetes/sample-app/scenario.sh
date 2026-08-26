@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
 #
 # scenario.sh -- turn otel-demo failure scenarios on and off, and prove flagd is
 # actually serving what you think it is.
@@ -58,7 +60,7 @@ KEY="demo.flagd.json"
 LIVE_PATH="/app/data/demo.flagd.json"
 
 die() { echo "error: $*" >&2; exit 1; }
-usage() { sed -n '2,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//; s/^#$//' | sed '$d'; }
+usage() { sed -n '4,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//; s/^#$//' | sed '$d'; }
 
 ARGS=()
 while [ $# -gt 0 ]; do
