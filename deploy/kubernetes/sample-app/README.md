@@ -295,10 +295,12 @@ emit none, so no error-rate rule can ever fire for them regardless of how hard
 their flag fails. Those failures are visible only on the *caller*. This is a
 property of the demo's instrumentation, not of NudgeBee.
 
-Two flags are known no-ops and are documented as such in `scenarios.yaml`:
-`cartFailure` (the flag is numeric since demo 3.0.0 while older cart builds read
-it as a boolean, so OpenFeature silently returns the default) and `adFailure`
-(the ad service cannot re-establish its flagd connection after a restart).
+Three flags are known no-ops and are documented as such in `scenarios.yaml`:
+`cartFailure` (numeric since demo 3.0.0 while older cart builds read it as a
+boolean, so OpenFeature silently returns the default), `adFailure` (the ad
+service cannot re-establish its flagd connection after a restart), and
+`productCatalogFailure` (its upstream targeting rule returns "off" on both
+branches, so it can never be enabled -- `scenario.sh --targeting` reports this).
 
 ---
 
