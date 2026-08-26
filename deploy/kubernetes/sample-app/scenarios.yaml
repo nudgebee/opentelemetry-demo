@@ -173,16 +173,22 @@ scenarios:
   - flag: productCatalogFailure
     variant: "on"
     service: product-catalog
-    status: works
-    confidence: expected
-    manifests_as: GetProduct fails for a specific product id.
-    detected_as:
-      - { alert: OtelDemoGRPCServerErrorRate, on: product-catalog }
+    status: silent_noop
+    confidence: verified
+    manifests_as: Nothing. It cannot be enabled at all.
     notes: >
-      Not re-tested in this pass, but it rides exactly the path postgresFailure
-      proved on the same service, so it is the one "expected" entry here with
-      real confidence behind it. Affects a single product id, so the error ratio
-      is lower than postgresFailure's 100% -- prefer postgresFailure for demos.
+      BROKEN UPSTREAM, not a NudgeBee gap. The flag ships with a targeting rule
+      whose branches BOTH return "off":
+        {"if": [{"==": [{"var": "product_id"}, "OLJCESPC7Z"]}, "off", "off"]}
+      Targeting outranks defaultVariant, so setting the flag on changes nothing
+      and GetProduct keeps succeeding -- verified with 8 consecutive HTTP 200s
+      against OLJCESPC7Z while the flag read "on". Byte-identical in upstream
+      chart 0.41.0 and this fork's src/flagd, so it is upstream's definition and
+      presumably meant to be ["on", "off"].
+      `scenario.sh --check` shows reason=TARGETING_MATCH for it, and
+      `scenario.sh --targeting productCatalogFailure` reports it as degenerate.
+      Use postgresFailure instead -- same service, same detection path, and it
+      actually works.
 
   - flag: recommendationCacheFailure
     variant: "on"
@@ -248,8 +254,16 @@ scenarios:
     variant: "on"
     service: payment
     status: works_indirectly
-    confidence: expected
-    notes: Same shape and same caveat as paymentFailure -- visible on checkout only.
+    confidence: verified
+    detected_as:
+      - { alert: OtelDemoGRPCServerErrorRate, on: checkout, rpc: oteldemo.CheckoutService/PlaceOrder }
+    detection_time: ~2m40s from trigger to alert firing
+    notes: >
+      Same shape and same caveat as paymentFailure -- visible on checkout only,
+      never on payment, which emits no gRPC server metrics. Verified in
+      ISOLATION: all other flags off and every OtelDemo alert confirmed resolved
+      first, because a preceding paymentFailure run keeps the same checkout alert
+      firing continuously and would otherwise have been miscredited to this flag.
 
   - flag: adManualGc
     variant: "on"
