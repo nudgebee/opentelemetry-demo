@@ -11,6 +11,8 @@
 #   ./scenario.sh <flag> [variant]       enable (variant defaults to "on")
 #   ./scenario.sh <flag> off             disable
 #   ./scenario.sh --check <flag>         ask flagd what it is SERVING for this flag
+#   ./scenario.sh --targeting <flag>     show the flag's targeting rule and whether
+#                                        it can ever be enabled at all
 #   ./scenario.sh --reset                turn every fault flag off
 #
 #   --namespace NS                       demo namespace (default: demo, or $DEMO_NAMESPACE)
@@ -131,13 +133,65 @@ print("note: loadGeneratorTraffic / loadGeneratorVUs are normal traffic controls
            -X POST -H 'Content-Type: application/json' -d '{}' 2>/dev/null; then break; fi
     done
     echo "flagd is serving:"
-    curl -s -X POST -H 'Content-Type: application/json' -d '{}' \
-      "http://localhost:${LP}/ofrep/v1/evaluate/flags/${FLAG}" | python3 -m json.tool 2>/dev/null \
+    RESP="$(curl -s -X POST -H 'Content-Type: application/json' -d '{}' \
+      "http://localhost:${LP}/ofrep/v1/evaluate/flags/${FLAG}")" \
       || die "could not evaluate '$FLAG' (is the flag name right?)"
+    printf '%s' "$RESP" | python3 -m json.tool 2>/dev/null || die "could not evaluate '$FLAG'"
     echo
+    # A TARGETING_MATCH reason means the answer above came from a targeting rule
+    # evaluated against an EMPTY context, not from defaultVariant -- so it says
+    # little about what the app sees, and the flag may be untoggleable outright.
+    # productCatalogFailure ships from upstream with
+    #   {"if": [{"==": [{"var":"product_id"},"OLJCESPC7Z"]}, "off", "off"]}
+    # where BOTH branches return "off", so it can never evaluate to on no matter
+    # what you set defaultVariant to. Without this check that presents as "the
+    # flag is on and nothing happened", which is indistinguishable from a
+    # monitoring gap.
+    if printf '%s' "$RESP" | grep -q '"reason":"TARGETING_MATCH"'; then
+      echo "NOTE: this flag has TARGETING rules, so the value above was resolved"
+      echo "      against an empty context and is not necessarily what the app"
+      echo "      sees. Check the rule before trusting it:"
+      echo "        $0 --targeting ${FLAG}"
+    fi
     echo "If 'value' looks right but the demo behaves normally, the SERVICE is not"
     echo "reading it -- see the notes at the top of this script. Do not assume the"
     echo "monitoring missed something until you have ruled that out."
+    exit 0 ;;
+
+  --targeting)
+    FLAG="${2:-}"; [ -n "$FLAG" ] || die "--targeting needs a flag name"
+    live_json | FLAG="$FLAG" python3 -c '
+import json,os,sys
+flag=os.environ["FLAG"]
+f=json.load(sys.stdin)["flags"].get(flag)
+if f is None: sys.exit("unknown flag: %s" % flag)
+print("defaultVariant:", f.get("defaultVariant"))
+print("variants      :", f.get("variants"))
+t=f.get("targeting")
+if not t:
+    print("targeting     : none -- defaultVariant is what gets served")
+    raise SystemExit
+print("targeting     :", json.dumps(t))
+variants=set(f.get("variants",{}))
+outs=set()
+def walk(o):
+    if isinstance(o,dict):
+        for k,v in o.items():
+            if k=="if":
+                for br in v:
+                    if isinstance(br,str): outs.add(br)
+                    else: walk(br)
+            else: walk(v)
+    elif isinstance(o,list):
+        for i in o: walk(i)
+walk(t)
+reach=sorted(outs & variants)
+print("reachable     :", reach)
+if reach and set(reach) <= {"off"}:
+    print()
+    print("DEGENERATE: every branch of this rule returns off, so the flag can")
+    print("never be enabled. Setting defaultVariant does nothing -- targeting wins.")
+'
     exit 0 ;;
 
   --reset) FLAG="__RESET__"; VARIANT="off" ;;
