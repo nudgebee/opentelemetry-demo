@@ -1,22 +1,21 @@
 # Copyright The OpenTelemetry Authors
 # SPDX-License-Identifier: Apache-2.0
 
-# NudgeBee dev-cluster overlay for the OpenTelemetry demo.
+# EXAMPLE overlay: point the demo at an observability stack you already run.
 #
-# Layer this ON TOP of values.yaml -- it is not standalone:
+# This file is a worked example, not a working config -- the endpoints below are
+# placeholders. Copy it, fill in your own, and layer it on top of values.yaml:
 #
 #   helm upgrade --install otel-demo open-telemetry/opentelemetry-demo \
 #     --namespace demo --create-namespace \
 #     -f deploy/kubernetes/sample-app/values.yaml \
-#     -f deploy/kubernetes/sample-app/values-nudgebee-dev.yaml
+#     -f my-stack.yaml
 #
-# Everything here is specific to OUR gke_nudgebee-dev cluster: an external OTel
-# collector in the `otel` namespace and VictoriaMetrics in `victoria`. None of it
-# will resolve anywhere else, which is exactly why it is not in the base file.
-#
-# It is also a worked example of the general "I already run an observability
-# stack" case: point the demo at your collector, turn off the bundled backends
-# you are duplicating, and re-wire anything that depended on them.
+# The base file deliberately leaves the chart's bundled collector, Prometheus,
+# Grafana, Jaeger and OpenSearch enabled so the demo is self-contained. If you
+# already run those, this is the shape of the override: repoint the collector,
+# disable what you are duplicating, and re-wire anything that depended on the
+# bits you disabled (here, Jaeger's SPM "Monitor" tab).
 #
 # ---------------------------------------------------------------------------
 # WHY THE ENV LIST IS REPEATED BELOW
@@ -28,13 +27,23 @@
 # minutes, which looks like the monitoring being slow rather than a values bug.
 # So all three are restated here. If you add an env override to the base file,
 # add it here too.
-
+#
+# ---------------------------------------------------------------------------
+# NOTE FOR THE NUDGEBEE DEV CLUSTER
+# ---------------------------------------------------------------------------
+# Our own dev cluster does NOT read this file. Its real endpoints live inline in
+# the ArgoCD Application `sample-app` (namespace `argocd`) under
+# spec.sources[0].helm.values, so no internal DNS name is committed here. That
+# Application also pins both sources -- the chart to a version and this repo to
+# the `lab-live` tag -- so merging to main no longer changes the cluster. Move
+# the tag when you want it to pick changes up.
+#
 default:
   envOverrides:
     # Point all services at our external OTel Collector in the `otel` namespace
     # instead of the chart's built-in collector (disabled below).
     - name: OTEL_COLLECTOR_NAME
-      value: otel-deployment-collector-collector.otel.svc.cluster.local
+      value: <your-collector>.<your-otel-namespace>.svc.cluster.local
     # Set resource attributes for service discovery and grouping
     - name: OTEL_RESOURCE_ATTRIBUTES
       value: 'service.name=$(OTEL_SERVICE_NAME),service.namespace=opentelemetry-demo,service.version={{ .Chart.AppVersion }}'
@@ -82,9 +91,9 @@ jaeger:
       - name: MEMORY_MAX_TRACES
         value: "25000"
       - name: PROMETHEUS_ADDR
-        value: vmsingle-victoria-victoria-metrics-k8s-stack.victoria.svc.cluster.local:8429
+        value: <your-prometheus-compatible-endpoint>.<your-metrics-namespace>.svc.cluster.local:8429
       - name: OTEL_COLLECTOR_HOST
-        value: otel-deployment-collector-collector.otel.svc.cluster.local
+        value: <your-collector>.<your-otel-namespace>.svc.cluster.local
       - name: OTEL_COLLECTOR_PORT_HTTP
         value: "4318"
       - name: JAEGER_HOST
