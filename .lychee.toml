@@ -12,12 +12,13 @@ max_concurrency = 1
 exclude = [
   "^http://localhost",
   "^https://calendar\\.google\\.com/calendar",
-  "^https://www\\.gnu\\.org",
-  "^https://platform\\.openai\\.com",
+  "^https://community\\.splunk\\.com/t5/AppDynamics-Knowledge-Base/How-to-observe-Kubernetes-deployment-of-OpenTelemetry-demo-app/ta-p/741454$",
   # Cloudflare-protected, returns 503 to bots
   "^https://coralogix\\.com/",
-  # Splunk community forum returns 403 to bots (link is valid in a browser)
-  "^https://community\\.splunk\\.com/",
+  "^https://www\\.gnu\\.org",
+  "^https://platform\\.openai\\.com",
+  "^https://www\\.robotstxt\\.org",
+  "^https://community\\.splunk\\.com",
 ]
 
 exclude_path = [
