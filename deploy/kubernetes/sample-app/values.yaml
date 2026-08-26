@@ -13,7 +13,7 @@
 # collector, Prometheus, Grafana, Jaeger and OpenSearch all stay enabled). That
 # keeps the demo self-contained and working out of the box, and lets NudgeBee's
 # agent scrape it independently. Disabling them is an optimisation for people who
-# already run a stack, not a prerequisite -- see values-nudgebee-dev.yaml for a
+# already run a stack, not a prerequisite -- see values-external-stack.example.yaml for a
 # worked example of doing that.
 #
 #   helm upgrade --install otel-demo open-telemetry/opentelemetry-demo \

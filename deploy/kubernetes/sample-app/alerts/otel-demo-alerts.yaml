@@ -5,7 +5,6 @@ apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: otel-demo-alerts
-  namespace: victoria
   labels:
     app: otel-demo
 spec:
