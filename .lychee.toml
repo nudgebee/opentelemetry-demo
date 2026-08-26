@@ -12,15 +12,16 @@ max_concurrency = 1
 exclude = [
   "^http://localhost",
   "^https://calendar\\.google\\.com/calendar",
-  "^https://www\\.gnu\\.org",
-  "^https://platform\\.openai\\.com",
+  "^https://community\\.splunk\\.com/t5/AppDynamics-Knowledge-Base/How-to-observe-Kubernetes-deployment-of-OpenTelemetry-demo-app/ta-p/741454$",
   # Cloudflare-protected, returns 503 to bots
   "^https://coralogix\\.com/",
-  # Splunk community forum returns 403 to bots (link is valid in a browser)
-  "^https://community\\.splunk\\.com/",
-  # Slack requires a workspace session; archive links 403 for anonymous clients
-  # (valid in a browser once signed in). Referenced from CONTRIBUTING.md, so
-  # without this every pull request fails the link check on an inherited error.
+  "^https://www\\.gnu\\.org",
+  "^https://platform\\.openai\\.com",
+  "^https://www\\.robotstxt\\.org",
+  "^https://community\\.splunk\\.com",
+  # Slack requires a workspace session; archive links 403 for anonymous
+  # clients. Referenced from CONTRIBUTING.md, so without this every pull
+  # request fails the link check on an inherited error.
   "^https://cloud-native\\.slack\\.com/",
 ]
 

@@ -160,8 +160,15 @@ scenarios:
       flag does nothing, with no error logged anywhere. Confirmed via
       `scenario.sh --check cartFailure` -> value: 1, variant: "100%", while cart
       behaved normally. (2) Even once fixed, cart emits no gRPC server metrics,
-      so it can only ever surface via its caller. The 3.0.0 sync fixes (1) by
-      moving cart to GetDoubleValueAsync; (2) is unchanged.
+      so it can only ever surface via its caller.
+
+      SOURCE IS NOW FIXED, IMAGES MAY NOT BE. The 3.0.0 sync moved cart to
+      GetDoubleValueAsync, so (1) is resolved in this repo. The deployed image
+      is a different question: `latest-cart` only picks the fix up once CI
+      rebuilds it, so a cluster running an older pull still shows the silent
+      no-op. Confirm with `scenario.sh --check cartFailure` plus an actual
+      EmptyCart before assuming it works. (2) is unchanged either way -- cart
+      still emits no server metrics, so detection remains caller-side only.
 
   - flag: productCatalogFailure
     variant: "on"
