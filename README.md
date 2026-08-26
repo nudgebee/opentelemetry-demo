@@ -6,7 +6,7 @@
 [![Commits](https://img.shields.io/github/commits-since/open-telemetry/opentelemetry-demo/latest?color=ff69b4&include_prereleases)](https://github.com/open-telemetry/opentelemetry-demo/graphs/commit-activity)
 [![Downloads](https://img.shields.io/docker/pulls/otel/demo)](https://hub.docker.com/r/otel/demo)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?color=red)](https://github.com/open-telemetry/opentelemetry-demo/blob/main/LICENSE)
-[![Integration Tests](https://github.com/open-telemetry/opentelemetry-demo/actions/workflows/run-integration-tests.yml/badge.svg)](https://github.com/open-telemetry/opentelemetry-demo/actions/workflows/run-integration-tests.yml)
+[![Telemetry Tests](https://github.com/open-telemetry/opentelemetry-demo/actions/workflows/run-telemetry-tests.yml/badge.svg)](https://github.com/open-telemetry/opentelemetry-demo/actions/workflows/run-telemetry-tests.yml)
 [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/opentelemetry-demo)](https://artifacthub.io/packages/helm/opentelemetry-helm/opentelemetry-demo)
 [![FOSSA Status](https://app.fossa.com/api/projects/custom%2B162%2Fgithub.com%2Fopen-telemetry%2Fopentelemetry-demo.svg?type=shield&issueType=license)](https://app.fossa.com/projects/custom%2B162%2Fgithub.com%2Fopen-telemetry%2Fopentelemetry-demo?ref=badge_shield&issueType=license)
 [![FOSSA Status](https://app.fossa.com/api/projects/custom%2B162%2Fgithub.com%2Fopen-telemetry%2Fopentelemetry-demo.svg?type=shield&issueType=security)](https://app.fossa.com/projects/custom%2B162%2Fgithub.com%2Fopen-telemetry%2Fopentelemetry-demo?ref=badge_shield&issueType=security)
@@ -61,21 +61,21 @@ keeping it up to date for you.
 
 |                           |                |                                  |
 |---------------------------|----------------|----------------------------------|
-| [AlibabaCloud LogService] | [Google Cloud] | [Parseable]                      |
-| [Amazon Web Services]     | [Grafana Labs] | [Sentry]                         |
-| [Apache Doris]            | [Guance]       | [ServiceNow Cloud Observability] |
-| [AppDynamics]             | [Honeycomb.io] | [SigNoz]                         |
-| [Aspecto]                 | [Instana]      | [SolarWinds Observability]       |
-| [Axiom]                   | [Kloudfuse]    | [Splunk]                         |
-| [Axoflow]                 | [Kopai]        | [Sumo Logic]                     |
-| [Azure Data Explorer]     | [Last9]        | [TelemetryHub]                   |
+| [AlibabaCloud LogService] | [Elastic]      | [Oracle]                         |
+| [Amazon Web Services]     | [Google Cloud] | [Parseable]                      |
+| [Apache Doris]            | [Grafana Labs] | [Sentry]                         |
+| [AppDynamics]             | [Guance]       | [ServiceNow Cloud Observability] |
+| [Aspecto]                 | [Honeycomb.io] | [SigNoz]                         |
+| [Axiom]                   | [Instana]      | [SolarWinds Observability]       |
+| [Axoflow]                 | [Kloudfuse]    | [Splunk]                         |
+| [Azure Data Explorer]     | [Kopai]        | [Sumo Logic]                     |
+| [Bronto]                  | [Last9]        | [TelemetryHub]                   |
 | [Causely]                 | [Liatrio]      | [Teletrace]                      |
 | [ClickStack]              | [Logz.io]      | [Tinybird]                       |
 | [Coralogix]               | [New Relic]    | [Tracetest]                      |
 | [Dash0]                   | [Oodle]        | [Tsuga]                          |
 | [Datadog]                 | [OpenObserve]  | [Uptrace]                        |
 | [Dynatrace]               | [OpenSearch]   | [VictoriaMetrics]                |
-| [Elastic]                 | [Oracle]       |                                  |
 
 ## Contributing
 
@@ -85,17 +85,15 @@ Wednesday at 8:30 AM PST and anyone is welcome.
 
 ### Maintainers
 
-- [Cyrille Le Clerc](https://github.com/cyrille-leclerc), Grafana Labs
+- [Cyrille Le Clerc](https://github.com/cyrille-leclerc), Datadog
 - [Juliano Costa](https://github.com/julianocosta89), Datadog
-- [Pierre Tessier](https://github.com/puckpuck), Honeycomb
-- [Roger Coll](https://github.com/rogercoll), Elastic
+- [Pierre Tessier](https://github.com/puckpuck), Resolve AI
 
 For more information about the maintainer role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#maintainer).
 
 ### Approvers
 
-- [Cedric Ziel](https://github.com/cedricziel), Grafana Labs
-- [Mikko Viitanen](https://github.com/mviitane), Dynatrace
+- [D&#xF3;nal O'Sullivan](https://github.com/osullivandonal), Elastic
 - [Piotr Kie&#x142;kowicz](https://github.com/Kielek), Splunk
 - [Shenoy Pratik](https://github.com/ps48), AWS OpenSearch
 
@@ -103,13 +101,16 @@ For more information about the approver role, see the [community repository](htt
 
 ### Emeritus
 
-- [Austin Parker](https://github.com/austinlparker)
-- [Carter Socha](https://github.com/cartersocha)
-- [Michael Maxwell](https://github.com/mic-max)
-- [Morgan McLean](https://github.com/mtwo)
-- [Penghan Wang](https://github.com/wph95)
-- [Reiley Yang](https://github.com/reyang)
-- [Ziqi Zhao](https://github.com/fatsheep9146)
+- [Austin Parker](https://github.com/austinlparker), Maintainer
+- [Carter Socha](https://github.com/cartersocha), Maintainer
+- [Cedric Ziel](https://github.com/cedricziel), Approver
+- [Michael Maxwell](https://github.com/mic-max), Approver
+- [Mikko Viitanen](https://github.com/mviitane), Maintainer
+- [Morgan McLean](https://github.com/mtwo), Approver
+- [Penghan Wang](https://github.com/wph95), Approver
+- [Reiley Yang](https://github.com/reyang), Approver
+- [Roger Coll](https://github.com/rogercoll), Maintainer
+- [Ziqi Zhao](https://github.com/fatsheep9146), Approver
 
 For more information about the emeritus role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#emeritus-maintainerapprovertriager).
 
@@ -129,6 +130,7 @@ For more information about the emeritus role, see the [community repository](htt
 [Axiom]: https://play.axiom.co/axiom-play-qf1k/dashboards/otel.traces.otel-demo-traces
 [Axoflow]: https://axoflow.com/opentelemetry-support-in-more-detail-in-axosyslog-and-syslog-ng/
 [Azure Data Explorer]: https://github.com/Azure/Azure-kusto-opentelemetry-demo
+[Bronto]: https://docs.bronto.io/getting-started/otel-demo
 [Causely]: https://github.com/causely-oss/otel-demo
 [ClickStack]: https://github.com/ClickHouse/opentelemetry-demo
 [Coralogix]: https://coralogix.com/blog/configure-otel-demo-send-telemetry-data-coralogix

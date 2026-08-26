@@ -27,7 +27,7 @@ using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using OpenFeature;
 using OpenFeature.Hooks;
-using OpenFeature.Contrib.Providers.Flagd;
+using OpenFeature.Providers.Flagd;
 
 var builder = WebApplication.CreateBuilder(args);
 string valkeyAddress = builder.Configuration["VALKEY_ADDR"];
@@ -68,23 +68,31 @@ builder.Services.AddSingleton<ICartStore>(x =>
     return store;
 });
 
-// Pinned to the flagd provider that matches the deployed flagd server.
+// Uses the flagd provider that ships with demo 3.0.0 (OpenFeature.Providers.Flagd),
+// which is also the version 3.0.0's own flagd is built against.
 //
-// The fork had moved to OpenFeature.Providers.Flagd 0.6.0, which evaluates
-// nothing against this flagd and silently returns each flag's default - no
-// connection error, no log line, flags simply never take effect. That made
-// failedReadinessProbe impossible to demonstrate: flagd served the flag as
-// true while cart's /healthz stayed 200. Passing an explicit URI did not help,
-// because the address was never the problem.
+// HISTORY - READ BEFORE CHANGING THIS. On demo 2.2.0 this fork was pinned back to
+// OpenFeature.Contrib.Providers.Flagd 0.3.2, because 0.6.0 evaluated nothing
+// against that era's flagd and silently returned each flag's default: no
+// connection error, no log line, flags simply never took effect. It made
+// failedReadinessProbe impossible to demonstrate - flagd served the flag as true
+// while cart's /healthz stayed 200. Passing an explicit URI did not help; the
+// address was never the problem. product-catalog hit the identical failure and
+// took the identical pin.
 //
-// This is the same failure product-catalog hit, and the same fix: use the
-// provider version the demo's flagd is known to work with rather than the
-// newest one. AddHostedFeatureLifecycle is required here to initialise the
-// provider at startup.
+// The 3.0.0 sync moves both services forward to the provider upstream now ships.
+// That SHOULD be correct, since the bundled flagd moved forward too - but the
+// failure mode is silent, so it must be verified behaviourally rather than
+// assumed: toggle a cart flag and confirm the behaviour actually changes. A
+// green build proves nothing here.
+//
+// The explicit .AddHostedFeatureLifecycle() this block used to carry is gone:
+// OpenFeature 2.13 registers the lifecycle automatically from AddOpenFeature()
+// and marks the manual call [Obsolete], which this project builds as an error.
+// The provider is still initialised at startup -- just by the SDK, not by us.
 builder.Services.AddOpenFeature(openFeatureBuilder =>
 {
     openFeatureBuilder
-        .AddHostedFeatureLifecycle()
         .AddProvider(_ => new FlagdProvider())
         .AddHook<MetricsHook>()
         .AddHook<TraceEnricherHook>();
