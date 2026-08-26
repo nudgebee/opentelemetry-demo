@@ -68,12 +68,19 @@ INCLUDE=""
 ANNOTATE_ALL="false"
 DRY_RUN="false"
 
-# Demo services that are actually built from source in this repo (each has a
-# Dockerfile under src/). Deliberately excludes the third-party components the
-# chart also deploys -- jaeger, grafana, opensearch, prometheus, valkey, postgres --
-# because their source does not live here and pointing the code agent at this repo
-# for them would produce confident nonsense.
-DEMO_SERVICES="accounting ad agent cart chatbot checkout currency email flagd-ui fraud-detection frontend frontend-proxy image-provider load-generator mcp payment product-catalog quote recommendation shipping"
+# Demo services whose APPLICATION CODE lives in this repo.
+#
+# Deliberately excludes two groups:
+#   - Third-party components the chart also deploys (jaeger, grafana, opensearch,
+#     prometheus, valkey-cart, astronomy-db). Their source is not here, so pointing
+#     the code agent at this repo for them would produce confident nonsense.
+#   - Components that have a Dockerfile under src/ but only package or configure an
+#     upstream image rather than building code we wrote (kafka, opensearch). The
+#     code agent would find a Dockerfile and some config, not the logic it needs.
+#
+# opamp-server and telemetry-docs ARE included: both are real services built from
+# code in src/ as of demo 3.0.0.
+DEMO_SERVICES="accounting ad agent cart chatbot checkout currency email flagd-ui fraud-detection frontend frontend-proxy image-provider load-generator mcp opamp-server payment product-catalog quote recommendation shipping telemetry-docs"
 
 die() { echo "error: $*" >&2; exit 1; }
 usage() { sed -n '2,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//; s/^#$//' | sed '$d'; }
