@@ -14,6 +14,24 @@
 # collector in the `otel` namespace and VictoriaMetrics in `victoria`. None of it
 # will resolve anywhere else, which is exactly why it is not in the base file.
 #
+# ---------------------------------------------------------------------------
+# OUR ARGOCD APP MUST LIST BOTH FILES
+# ---------------------------------------------------------------------------
+# The dev cluster deploys the demo through the ArgoCD Application `sample-app`
+# (namespace `argocd`), which has automated sync with prune enabled. Its
+# helm.valueFiles MUST name this overlay as well as the base:
+#
+#   valueFiles:
+#     - $values/deploy/kubernetes/sample-app/values.yaml
+#     - $values/deploy/kubernetes/sample-app/values-nudgebee-dev.yaml
+#
+# Listing only the base is not a no-op, it is a live outage. This happened once:
+# the base leaves the chart's bundled backends at their defaults, so ArgoCD
+# created prometheus, grafana, opensearch and a 12-pod otel-collector DaemonSet
+# inside `demo`, dropped OTEL_COLLECTOR_NAME so nothing reached our collector,
+# and rolled every service. Recovery is to restore both entries and hard-refresh
+# the app; prune removes the extras.
+#
 # It is also a worked example of the general "I already run an observability
 # stack" case: point the demo at your collector, turn off the bundled backends
 # you are duplicating, and re-wire anything that depended on them.
