@@ -141,6 +141,16 @@ components:
   # memory bumped 20Mi → 64Mi: the fork image links the postgres driver + otelsql
   # and needs a little more headroom to start.
   product-catalog:
+    # ROLLING TAG -- pin this before pointing anyone external at the lab.
+    # `latest-product-catalog` is reassigned by every build, so with
+    # pullPolicy: Always the application can change between two runs of the same
+    # scenario, and one bad push breaks every install at once. Once a release is
+    # cut (Actions -> "Release images", e.g. version `3.0.0-nudgebee.1`) replace
+    # these three lines with:
+    #   tag: 3.0.0-nudgebee.1-product-catalog
+    #   pullPolicy: IfNotPresent
+    # and update --code-commit in annotate-workloads.sh to the commit that built
+    # it, or the code agent will cite source that is not what is running.
     imageOverride:
       repository: ghcr.io/nudgebee/opentelemetry-demo
       tag: latest-product-catalog
@@ -171,6 +181,8 @@ components:
   # because /healthz and the second listener were added in this fork; upstream
   # `ghcr.io/open-telemetry/demo` has neither and the probe would never succeed.
   cart:
+    # ROLLING TAG -- see the note on product-catalog above. Pin to
+    # `<version>-cart` with pullPolicy: IfNotPresent once a release is cut.
     imageOverride:
       repository: ghcr.io/nudgebee/opentelemetry-demo
       tag: latest-cart
