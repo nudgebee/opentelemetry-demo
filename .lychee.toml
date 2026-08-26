@@ -18,6 +18,10 @@ exclude = [
   "^https://coralogix\\.com/",
   # Splunk community forum returns 403 to bots (link is valid in a browser)
   "^https://community\\.splunk\\.com/",
+  # Slack requires a workspace session; archive links 403 for anonymous clients
+  # (valid in a browser once signed in). Referenced from CONTRIBUTING.md, so
+  # without this every pull request fails the link check on an inherited error.
+  "^https://cloud-native\\.slack\\.com/",
 ]
 
 exclude_path = [
