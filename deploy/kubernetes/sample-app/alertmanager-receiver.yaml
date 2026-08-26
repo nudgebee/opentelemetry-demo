@@ -1,0 +1,141 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Route the demo's alerts to NudgeBee.
+#
+# The rules in alerts/ decide WHEN something is wrong. This decides where that
+# finding goes. Without it the alerts fire correctly and NudgeBee never hears
+# about them, so the demo shows a healthy-looking Troubleshoot page while
+# Prometheus is lit up -- the single most common way this lab is mis-set-up.
+#
+# ---------------------------------------------------------------------------
+# BEFORE YOU APPLY THIS: get a token
+# ---------------------------------------------------------------------------
+# 1. In NudgeBee, go to Admin > Integrations > Prometheus AlertManager Webhook.
+# 2. Click "Add Prometheus Alertmanager Webhook Account".
+# 3. Give it a name and select the account (cluster) the demo runs on. Getting
+#    this wrong is not fatal but is annoying: alerts land against the wrong
+#    cluster and never correlate with the demo's workloads.
+# 4. Save, then copy the webhook token it issues.
+#
+# The endpoint accepts the token either as a `?token=` query parameter or as an
+# `Authorization: Bearer <token>` header -- both are read by the same code path.
+# This file uses the header, so the token lives in a Secret rather than in a URL
+# that gets logged by every proxy in between.
+#
+# ---------------------------------------------------------------------------
+# APPLYING IT
+# ---------------------------------------------------------------------------
+#   kubectl -n <alertmanager-namespace> create secret generic nudgebee-webhook \
+#     --from-literal=token='<TOKEN FROM STEP 4>'
+#
+#   # then edit the two <PLACEHOLDER> values below and:
+#   kubectl -n <alertmanager-namespace> apply -f alertmanager-receiver.yaml
+#
+# `<alertmanager-namespace>` is wherever your Alertmanager runs. If you followed
+# the NudgeBee agent install docs that is `nudgebee-agent`.
+#
+# ---------------------------------------------------------------------------
+# A NOTE ON GROUPING -- please do not "fix" this
+# ---------------------------------------------------------------------------
+# group_by is deliberately wide and the group intervals are deliberately short.
+# One failing dependency in this demo lights up every caller in the call graph,
+# and that burst IS the thing being demonstrated: it is what NudgeBee's triage
+# and correlation collapse back down into a single ranked issue. Collapsing it
+# here at the Alertmanager level would hide the noise before NudgeBee ever sees
+# it, and the demo would show a tool solving a problem it was never given.
+---
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: nudgebee
+  labels:
+    app: otel-demo
+    # kube-prometheus-stack only picks up AlertmanagerConfig objects matching its
+    # alertmanagerConfigSelector. With the chart's defaults that means the Helm
+    # release name -- the same trap as PrometheusRule and the `release` label.
+    # If you installed as `nudgebee-prometheus`, keep this as-is; otherwise change
+    # it to your release name, or the config is created and silently ignored.
+    release: nudgebee-prometheus
+spec:
+  route:
+    receiver: nudgebee
+    # Keep every alert together in one route so nothing is dropped on the floor.
+    groupBy: ['alertname', 'namespace', 'service_name', 'pod']
+    groupWait: 10s
+    groupInterval: 30s
+    # 4h, not the usual 12h: during a demo you may re-trigger the same scenario
+    # several times in an afternoon, and a long repeat_interval makes the second
+    # run look like nothing happened.
+    repeatInterval: 4h
+  receivers:
+    - name: nudgebee
+      webhookConfigs:
+        - url: https://<YOUR-NUDGEBEE-HOST>/api/webhooks/prometheus-alertmanager
+          # Alertmanager batches by default; NudgeBee handles multi-alert payloads.
+          sendResolved: true
+          httpConfig:
+            authorization:
+              type: Bearer
+              credentials:
+                name: nudgebee-webhook
+                key: token
+---
+# ---------------------------------------------------------------------------
+# PLAIN ALERTMANAGER (no prometheus-operator)
+# ---------------------------------------------------------------------------
+# If you run Alertmanager from a config file rather than an AlertmanagerConfig
+# CRD, the equivalent stanza is below. Add it to your alertmanager.yml -- do not
+# apply this file for that case.
+#
+#   route:
+#     receiver: nudgebee
+#     group_by: ['alertname', 'namespace', 'service_name', 'pod']
+#     group_wait: 10s
+#     group_interval: 30s
+#     repeat_interval: 4h
+#
+#   receivers:
+#     - name: nudgebee
+#       webhook_configs:
+#         - url: https://<YOUR-NUDGEBEE-HOST>/api/webhooks/prometheus-alertmanager
+#           send_resolved: true
+#           http_config:
+#             authorization:
+#               type: Bearer
+#               credentials_file: /etc/alertmanager/secrets/nudgebee-webhook/token
+#
+# The query-parameter form also works if putting a token in a URL is acceptable
+# in your environment, and needs no secret mount:
+#
+#         - url: https://<YOUR-NUDGEBEE-HOST>/api/webhooks/prometheus-alertmanager?token=<TOKEN>
+#
+# ---------------------------------------------------------------------------
+# VERIFYING IT WORKS
+# ---------------------------------------------------------------------------
+# Do not wait for a scenario to prove the wiring -- test the pipe on its own
+# first, so that if a scenario later produces nothing you already know the
+# transport is not the reason:
+#
+#   curl -sS -o /dev/null -w '%{http_code}\n' \
+#     -X POST 'https://<YOUR-NUDGEBEE-HOST>/api/webhooks/prometheus-alertmanager?token=<TOKEN>' \
+#     -H 'Content-Type: application/json' \
+#     -d '{"version":"4","status":"firing","alerts":[{"status":"firing",
+#          "labels":{"alertname":"NudgeBeeWebhookSmokeTest","severity":"warning",
+#                    "namespace":"demo","service_name":"smoke-test"},
+#          "annotations":{"summary":"connectivity check, safe to ignore"},
+#          "startsAt":"2026-01-01T00:00:00Z"}]}'
+#
+# 200 means the token resolved to your integration. 400 means it did not -- the
+# usual cause is a copy-paste error in the token, not a network problem.
+#
+# ---------------------------------------------------------------------------
+# IF ALERTS ARRIVE BUT ATTACH TO THE WRONG THING
+# ---------------------------------------------------------------------------
+# NudgeBee derives an event's subject, namespace and severity from the alert's
+# labels. The rules in alerts/ already emit `service_name`, `k8s_deployment_name`,
+# `pod`, `namespace` and `severity`, which is what the defaults expect. If your
+# events show up unattached, set the mapping explicitly on the integration:
+# Admin > Integrations > Prometheus AlertManager Webhook > Edit > Webhook Label
+# Mapping, and set Subject Name Labels to `k8s_deployment_name,service_name`,
+# Namespace Labels to `namespace`, and Severity Labels to `severity`.
