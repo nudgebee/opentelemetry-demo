@@ -1,0 +1,66 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Publish immutable, versioned demo images on demand.
+#
+# WHY THIS EXISTS
+#   Every tag this repo publishes today rolls: `latest-*`, `nightly-*` and
+#   `main-*` are all reassigned by later builds. Nothing else can be triggered
+#   by hand -- build-images.yml runs on push with push:false (it only proves the
+#   images compile), and nightly-release.yml is a cron that always publishes
+#   `nightly`. So there is no way to obtain a tag that will still mean the same
+#   thing tomorrow.
+#
+#   That is fine for our own dev cluster, which wants the newest build. It is
+#   not fine for the NudgeBee demo lab: someone evaluating the product should
+#   not have the application change underneath them between two runs, and a bad
+#   push should not break every lab install at once.
+#
+#   This workflow adds the missing piece -- a manual trigger that stamps a
+#   version you choose. The reusable workflow already supports it; nothing was
+#   calling it with a real version.
+#
+# HOW TO CUT A RELEASE
+#   Actions -> "Release images" -> Run workflow, and give a version such as
+#   `3.0.0-nudgebee.1`. That publishes, for every component:
+#
+#       ghcr.io/nudgebee/opentelemetry-demo:3.0.0-nudgebee.1-<component>
+#
+#   Then pin the two fork-built images in
+#   deploy/kubernetes/sample-app/values.yaml to that tag and set
+#   pullPolicy: IfNotPresent. See the comment there.
+#
+#   Use a version that says what it is built from: <upstream demo version>
+#   -nudgebee.<n>. Do not reuse a version -- the whole point is immutability,
+#   and GHCR will happily let you overwrite one.
+
+name: Release images
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Immutable version tag, e.g. 3.0.0-nudgebee.1 (do not reuse)'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  release_images:
+    name: Build and publish versioned images
+    permissions:
+      contents: read  # required by the component-build-images reusable workflow
+      packages: write  # required to push built images to GHCR
+    uses: ./.github/workflows/component-build-images.yml
+    with:
+      push: true
+      # Build every component regardless of what changed: a release must be a
+      # complete, self-consistent set. Without this the change-detection step
+      # skips untouched components and the version tag exists for only some of
+      # them, which is worse than not tagging at all.
+      force_build: true
+      version: ${{ inputs.version }}
+      ghcr_repo: ghcr.io/nudgebee/opentelemetry-demo
+    secrets: inherit
