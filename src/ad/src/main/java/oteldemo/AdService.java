@@ -161,7 +161,6 @@ public final class AdService {
 
   private static class AdServiceImpl extends oteldemo.AdServiceGrpc.AdServiceImplBase {
     
-    private static final String AD_FAILURE = "adFailure";
     private static final String AD_MANUAL_GC_FEATURE_FLAG = "adManualGc";
     private static final String AD_HIGH_CPU_FEATURE_FLAG = "adHighCpu";
     private static final Client ffClient = OpenFeatureAPI.getInstance().getClient();
@@ -233,11 +232,6 @@ public final class AdService {
             1,
             Attributes.of(
                 adRequestTypeKey, adRequestType.name(), adResponseTypeKey, adResponseType.name()));
-
-        // Throw 1/10 of the time to simulate a failure when the feature flag is enabled
-        if (ffClient.getBooleanValue(AD_FAILURE, false, evaluationContext) && random.nextInt(10) == 0) {
-          throw new StatusRuntimeException(Status.UNAVAILABLE);
-        }
 
         if (ffClient.getBooleanValue(AD_MANUAL_GC_FEATURE_FLAG, false, evaluationContext)) {
           logger.warn("Feature Flag " + AD_MANUAL_GC_FEATURE_FLAG + " enabled, performing a manual gc now");
