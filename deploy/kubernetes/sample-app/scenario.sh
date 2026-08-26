@@ -33,6 +33,25 @@
 # needed: the live write for "now", the ConfigMap for "after the next restart".
 #
 # ---------------------------------------------------------------------------
+# IF THE DEMO IS DEPLOYED BY ARGOCD (or any GitOps controller)
+# ---------------------------------------------------------------------------
+# The ConfigMap write below is a change to a resource the controller owns, so
+# after any toggle the Application reports OutOfSync on `flagd-config`. That is
+# cosmetic drift, not a failure, and the live emptyDir write is unaffected.
+#
+# What happens next depends on selfHeal:
+#   selfHeal false (the default, and what our dev cluster uses) -- drift is NOT
+#     reverted. The app simply sits OutOfSync until someone syncs it. Toggles
+#     survive.
+#   selfHeal true -- the controller reverts the ConfigMap. The live write still
+#     applies, so the scenario keeps working until flagd next restarts, at which
+#     point the init container re-seeds from the reverted ConfigMap and the flag
+#     silently goes back to off.
+#
+# So on a selfHeal cluster, treat a flag that "turned itself off" as a sync, not
+# a bug -- and re-run the toggle after any flagd restart.
+#
+# ---------------------------------------------------------------------------
 # WHEN A SCENARIO SEEMS TO DO NOTHING, USE --check FIRST
 # ---------------------------------------------------------------------------
 # `--check` queries flagd's OFREP endpoint directly, so you can tell three very
