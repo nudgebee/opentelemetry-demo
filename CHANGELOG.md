@@ -7,6 +7,8 @@ the release.
 
 ## Unreleased
 
+* [ad] Increase flagd client deadline to tolerate latency spikes
+  ([#480](https://github.com/open-telemetry/opentelemetry-demo/pull/480))
 * [recommendation] Fix `recommendationCacheFailure` feature flag by
   using `ListProducts` instead of `GetProduct`
   ([#3260](https://github.com/open-telemetry/opentelemetry-demo/pull/3260))
