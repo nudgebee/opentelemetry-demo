@@ -4,46 +4,49 @@
 # Route the demo's alerts to NudgeBee.
 #
 # The rules in alerts/ decide WHEN something is wrong. This decides where that
-# finding goes. Without it the alerts fire correctly and NudgeBee never hears
-# about them, so the demo shows a healthy-looking Troubleshoot page while
-# Prometheus is lit up -- the single most common way this lab is mis-set-up.
+# goes. Without it the alerts fire correctly and NudgeBee never hears about
+# them, so Troubleshoot looks healthy while Prometheus is lit up.
 #
-# ---------------------------------------------------------------------------
-# BEFORE YOU APPLY THIS: get a token
-# ---------------------------------------------------------------------------
-# 1. In NudgeBee, go to Admin > Integrations > Prometheus AlertManager Webhook.
-# 2. Click "Add Prometheus Alertmanager Webhook Account".
-# 3. Give it a name and select the account (cluster) the demo runs on. Getting
-#    this wrong is not fatal but is annoying: alerts land against the wrong
-#    cluster and never correlate with the demo's workloads.
-# 4. Save, then copy the webhook token it issues.
+# ===========================================================================
+# FIRST: YOU MAY ALREADY HAVE THIS
+# ===========================================================================
+# If you installed Prometheus using the NudgeBee agent's own values file:
 #
-# The endpoint accepts the token either as a `?token=` query parameter or as an
-# `Authorization: Bearer <token>` header -- both are read by the same code path.
-# This file uses the header, so the token lives in a Secret rather than in a URL
-# that gets logged by every proxy in between.
+#   helm upgrade --install nudgebee-prometheus prometheus-community/kube-prometheus-stack \
+#     -n nudgebee-agent --create-namespace ... \
+#     -f https://raw.githubusercontent.com/nudgebee/k8s-agent/main/extra-scrape-config.yaml
 #
-# ---------------------------------------------------------------------------
-# APPLYING IT
-# ---------------------------------------------------------------------------
-#   kubectl -n <alertmanager-namespace> create secret generic nudgebee-webhook \
-#     --from-literal=token='<TOKEN FROM STEP 4>'
+# then extra-scrape-config.yaml ALREADY added the receiver below for you, and
+# you can skip this file entirely. Check before adding a second one:
 #
-#   # then edit the two <PLACEHOLDER> values below and:
-#   kubectl -n <alertmanager-namespace> apply -f alertmanager-receiver.yaml
+#   kubectl -n nudgebee-agent get secret \
+#     alertmanager-nudgebee-prometheus-kube-p-alertmanager -o \
+#     jsonpath='{.data.alertmanager\.yaml}' | base64 -d | grep -A3 'api/alerts'
 #
-# `<alertmanager-namespace>` is wherever your Alertmanager runs. If you followed
-# the NudgeBee agent install docs that is `nudgebee-agent`.
+# TWO CASES WHERE YOU DO NOT HAVE IT, AND THIS IS THE COMMON ONE:
 #
-# ---------------------------------------------------------------------------
-# A NOTE ON GROUPING -- please do not "fix" this
-# ---------------------------------------------------------------------------
-# group_by is deliberately wide and the group intervals are deliberately short.
-# One failing dependency in this demo lights up every caller in the call graph,
-# and that burst IS the thing being demonstrated: it is what NudgeBee's triage
-# and correlation collapse back down into a single ranked issue. Collapsing it
-# here at the Alertmanager level would hide the noise before NudgeBee ever sees
-# it, and the demo would show a tool solving a problem it was never given.
+#   1. You already ran Prometheus, so you skipped that -f flag. The agent docs
+#      say "already have Prometheus? you just need its URL" -- true for metrics,
+#      but it also means nothing ever wired your Alertmanager. This is the
+#      normal situation on any real cluster.
+#   2. You renamed the Helm release. The URL in extra-scrape-config.yaml is
+#      HARDCODED to nudgebee-agent-runner.nudgebee-agent.svc, while the chart
+#      names the Service {{ fullname }}-runner. Those agree only when the
+#      release is called exactly `nudgebee-agent` in namespace `nudgebee-agent`.
+#      Release `nudgebee-prod-agent` produces
+#      nudgebee-prod-agent-nudgebee-agent-runner, the hardcoded URL resolves to
+#      nothing, and every alert is silently dropped. Confirm YOUR service name:
+#
+#        kubectl get svc -A | grep runner
+#
+# ===========================================================================
+# PATH A -- AGENT INSTALLED IN THIS CLUSTER  (use this one)
+# ===========================================================================
+# Alertmanager POSTs in-cluster to the runner's /api/alerts intake, and the
+# runner forwards to the NudgeBee collector using the auth key it already has.
+# No token, no secret, no public ingress. This is what our own clusters use.
+#
+# Edit the two <PLACEHOLDER>s and apply into your Alertmanager's namespace.
 ---
 apiVersion: monitoring.coreos.com/v1alpha1
 kind: AlertmanagerConfig
@@ -51,91 +54,122 @@ metadata:
   name: nudgebee
   labels:
     app: otel-demo
-    # kube-prometheus-stack only picks up AlertmanagerConfig objects matching its
-    # alertmanagerConfigSelector. With the chart's defaults that means the Helm
-    # release name -- the same trap as PrometheusRule and the `release` label.
-    # If you installed as `nudgebee-prometheus`, keep this as-is; otherwise change
-    # it to your release name, or the config is created and silently ignored.
+    # kube-prometheus-stack only picks up AlertmanagerConfig objects matching
+    # its alertmanagerConfigSelector, which by default means its own Helm
+    # release name. Wrong label = created, ignored, no error. Same trap as the
+    # `release` label on PrometheusRule.
     release: nudgebee-prometheus
 spec:
   route:
     receiver: nudgebee
-    # Keep every alert together in one route so nothing is dropped on the floor.
-    groupBy: ['alertname', 'namespace', 'service_name', 'pod']
-    groupWait: 10s
-    groupInterval: 30s
-    # 4h, not the usual 12h: during a demo you may re-trigger the same scenario
-    # several times in an afternoon, and a long repeat_interval makes the second
-    # run look like nothing happened.
+    # groupBy ['...'] means "do not aggregate" -- deliver each alert separately.
+    # That is deliberate. One failing dependency in this demo lights up every
+    # caller, and that burst IS the thing being demonstrated: NudgeBee's triage
+    # collapses it back into one ranked issue. Grouping here would hide the
+    # noise before NudgeBee ever sees it, and the demo would show a tool solving
+    # a problem it was never given.
+    groupBy: ['...']
+    groupWait: 1s
+    groupInterval: 1s
+    # 4h, not 12h: during a demo you may re-run the same scenario several times
+    # in an afternoon, and a long repeat interval makes the second run look like
+    # nothing happened.
     repeatInterval: 4h
+    continue: true
   receivers:
     - name: nudgebee
       webhookConfigs:
-        - url: https://<YOUR-NUDGEBEE-HOST>/api/webhooks/prometheus-alertmanager
-          # Alertmanager batches by default; NudgeBee handles multi-alert payloads.
+        # <RELEASE>-runner or <RELEASE>-nudgebee-agent-runner -- check with the
+        # `kubectl get svc -A | grep runner` command above. Port 80 -> 5000.
+        - url: http://<AGENT-RUNNER-SERVICE>.<AGENT-NAMESPACE>.svc/api/alerts
           sendResolved: true
-          httpConfig:
-            authorization:
-              type: Bearer
-              credentials:
-                name: nudgebee-webhook
-                key: token
 ---
-# ---------------------------------------------------------------------------
-# PLAIN ALERTMANAGER (no prometheus-operator)
-# ---------------------------------------------------------------------------
-# If you run Alertmanager from a config file rather than an AlertmanagerConfig
-# CRD, the equivalent stanza is below. Add it to your alertmanager.yml -- do not
-# apply this file for that case.
+# ===========================================================================
+# PATH B -- NO AGENT IN THIS CLUSTER (SaaS / central Prometheus)
+# ===========================================================================
+# Only when there is no runner to POST to -- e.g. Grafana Cloud, Chronosphere,
+# or an Alertmanager outside the monitored cluster. Goes to the public webhook
+# instead, which DOES need a token:
 #
-#   route:
-#     receiver: nudgebee
-#     group_by: ['alertname', 'namespace', 'service_name', 'pod']
-#     group_wait: 10s
-#     group_interval: 30s
-#     repeat_interval: 4h
+#   1. NudgeBee > Admin > Integrations > Prometheus AlertManager Webhook
+#   2. Add account, select the cluster the demo runs on, copy the token.
+#   3. kubectl -n <ns> create secret generic nudgebee-webhook \
+#        --from-literal=token='<TOKEN>'
 #
 #   receivers:
 #     - name: nudgebee
-#       webhook_configs:
+#       webhookConfigs:
 #         - url: https://<YOUR-NUDGEBEE-HOST>/api/webhooks/prometheus-alertmanager
-#           send_resolved: true
-#           http_config:
+#           sendResolved: true
+#           httpConfig:
 #             authorization:
 #               type: Bearer
-#               credentials_file: /etc/alertmanager/secrets/nudgebee-webhook/token
+#               credentials: { name: nudgebee-webhook, key: token }
 #
-# The query-parameter form also works if putting a token in a URL is acceptable
-# in your environment, and needs no secret mount:
+# The endpoint also accepts ?token=<TOKEN> in the URL; the header form is
+# preferred so the token is not logged by every proxy in between.
 #
-#         - url: https://<YOUR-NUDGEBEE-HOST>/api/webhooks/prometheus-alertmanager?token=<TOKEN>
+# ===========================================================================
+# PLAIN ALERTMANAGER (no prometheus-operator)
+# ===========================================================================
+#   route:
+#     receiver: nudgebee
+#     routes:
+#       - receiver: nudgebee
+#         group_by: ['...']
+#         group_wait: 1s
+#         group_interval: 1s
+#         matchers: [ severity =~ ".*" ]
+#         repeat_interval: 4h
+#         continue: true
+#   receivers:
+#     - name: nudgebee
+#       webhook_configs:
+#         - url: http://<AGENT-RUNNER-SERVICE>.<AGENT-NAMESPACE>.svc/api/alerts
+#           send_resolved: true
 #
-# ---------------------------------------------------------------------------
-# VERIFYING IT WORKS
-# ---------------------------------------------------------------------------
-# Do not wait for a scenario to prove the wiring -- test the pipe on its own
-# first, so that if a scenario later produces nothing you already know the
-# transport is not the reason:
+# `continue: true` matters if you have other receivers (PagerDuty, Slack):
+# without it the first matching route wins and downstream receivers are skipped.
 #
-#   curl -sS -o /dev/null -w '%{http_code}\n' \
-#     -X POST 'https://<YOUR-NUDGEBEE-HOST>/api/webhooks/prometheus-alertmanager?token=<TOKEN>' \
+# ===========================================================================
+# VERIFY THE PIPE BEFORE BLAMING A SCENARIO
+# ===========================================================================
+# Do not wait for a scenario to prove the wiring. Then, if a scenario later
+# produces nothing, you already know the transport is not the reason.
+#
+# Path A -- post a synthetic alert straight at the runner:
+#
+#   kubectl -n <AGENT-NAMESPACE> port-forward svc/<AGENT-RUNNER-SERVICE> 8080:80
+#   curl -sS -o /dev/null -w '%{http_code}\n' -X POST localhost:8080/api/alerts \
 #     -H 'Content-Type: application/json' \
 #     -d '{"version":"4","status":"firing","alerts":[{"status":"firing",
-#          "labels":{"alertname":"NudgeBeeWebhookSmokeTest","severity":"warning",
+#          "labels":{"alertname":"NudgeBeeSmokeTest","severity":"warning",
 #                    "namespace":"demo","service_name":"smoke-test"},
 #          "annotations":{"summary":"connectivity check, safe to ignore"},
 #          "startsAt":"2026-01-01T00:00:00Z"}]}'
 #
-# 200 means the token resolved to your integration. 400 means it did not -- the
-# usual cause is a copy-paste error in the token, not a network problem.
+# Then confirm the runner forwarded rather than shed it:
 #
-# ---------------------------------------------------------------------------
-# IF ALERTS ARRIVE BUT ATTACH TO THE WRONG THING
-# ---------------------------------------------------------------------------
-# NudgeBee derives an event's subject, namespace and severity from the alert's
-# labels. The rules in alerts/ already emit `service_name`, `k8s_deployment_name`,
-# `pod`, `namespace` and `severity`, which is what the defaults expect. If your
-# events show up unattached, set the mapping explicitly on the integration:
-# Admin > Integrations > Prometheus AlertManager Webhook > Edit > Webhook Label
-# Mapping, and set Subject Name Labels to `k8s_deployment_name,service_name`,
-# Namespace Labels to `namespace`, and Severity Labels to `severity`.
+#   kubectl -n <AGENT-NAMESPACE> logs deploy/<RELEASE>-runner | grep -i alert
+#   # the runner also exports nudgebee_forward_* counters on /metrics
+#
+# ===========================================================================
+# IF ALERTS ARRIVE BUT ATTACH TO THE WRONG WORKLOAD
+# ===========================================================================
+# NudgeBee derives an event's subject, namespace and severity from alert labels.
+# The rules in alerts/ emit service_name, k8s_deployment_name, pod, namespace
+# and severity, which is what the defaults expect. If events show up unattached,
+# set the mapping explicitly under the integration's Webhook Label Mapping:
+# Subject Name -> k8s_deployment_name,service_name; Namespace -> namespace;
+# Severity -> severity.
+#
+# ===========================================================================
+# ONE MORE THING, FOR NON-DEMO CLUSTERS
+# ===========================================================================
+# The agent ships its own default rules (ApplicationAPIFailures,
+# HighErrorCriticalLogs, KubeHpaMaxedOut). On a cluster running the demo they
+# will also fire on the demo namespace, which is usually what you want here --
+# it is extra signal for free. If you later run this demo alongside real
+# workloads and want it excluded from those rules, the agent chart supports:
+#
+#   --set alertmanager.extra_rule_exclusions='{demo}'
