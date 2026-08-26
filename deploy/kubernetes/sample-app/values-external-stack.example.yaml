@@ -1,0 +1,160 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# EXAMPLE overlay: point the demo at an observability stack you already run.
+#
+# This file is a worked example, not a working config -- the endpoints below are
+# placeholders. Copy it, fill in your own, and layer it on top of values.yaml:
+#
+#   helm upgrade --install otel-demo open-telemetry/opentelemetry-demo \
+#     --namespace demo --create-namespace \
+#     -f deploy/kubernetes/sample-app/values.yaml \
+#     -f my-stack.yaml
+#
+# The base file deliberately leaves the chart's bundled collector, Prometheus,
+# Grafana, Jaeger and OpenSearch enabled so the demo is self-contained. If you
+# already run those, this is the shape of the override: repoint the collector,
+# disable what you are duplicating, and re-wire anything that depended on the
+# bits you disabled (here, Jaeger's SPM "Monitor" tab).
+#
+# ---------------------------------------------------------------------------
+# WHY THE ENV LIST IS REPEATED BELOW
+# ---------------------------------------------------------------------------
+# Helm REPLACES lists across -f files rather than merging them. `envOverrides` is
+# a list, so if this overlay declared only OTEL_COLLECTOR_NAME it would wipe the
+# base file's OTEL_RESOURCE_ATTRIBUTES and OTEL_METRIC_EXPORT_INTERVAL -- and
+# losing the 15s export interval silently puts scenario detection back to ~8
+# minutes, which looks like the monitoring being slow rather than a values bug.
+# So all three are restated here. If you add an env override to the base file,
+# add it here too.
+#
+# ---------------------------------------------------------------------------
+# NOTE FOR THE NUDGEBEE DEV CLUSTER
+# ---------------------------------------------------------------------------
+# Our own dev cluster does NOT read this file. Its real endpoints live inline in
+# the ArgoCD Application `sample-app` (namespace `argocd`) under
+# spec.sources[0].helm.values, so no internal DNS name is committed here. That
+# Application also pins both sources -- the chart to a version and this repo to
+# the `lab-live` tag -- so merging to main no longer changes the cluster. Move
+# the tag when you want it to pick changes up.
+#
+default:
+  envOverrides:
+    # Point all services at our external OTel Collector in the `otel` namespace
+    # instead of the chart's built-in collector (disabled below).
+    - name: OTEL_COLLECTOR_NAME
+      value: <your-collector>.<your-otel-namespace>.svc.cluster.local
+    # Set resource attributes for service discovery and grouping
+    - name: OTEL_RESOURCE_ATTRIBUTES
+      value: 'service.name=$(OTEL_SERVICE_NAME),service.namespace=opentelemetry-demo,service.version={{ .Chart.AppVersion }}'
+    # Export metrics every 15s instead of the OTel SDK default of 60s.
+    #
+    # This is the dominant factor in how fast a scenario becomes visible. At the
+    # 60s default every series gets one sample per minute (verified:
+    # count_over_time(...[10m]) returned 10), so a rate() window needs minutes
+    # just to collect enough points, and no alert could fire in under ~7 min no
+    # matter how the rules were tuned. The 10s Prometheus scrape interval was
+    # irrelevant - there was simply nothing new to scrape.
+    #
+    # At 15s a 2m rate window holds ~8 samples, so the alert expressions cross
+    # their thresholds in well under a minute. Cost is 4x more metric exports,
+    # which is immaterial at demo scale.
+    - name: OTEL_METRIC_EXPORT_INTERVAL
+      value: "15000"
+
+# Disable built-in OTel Collector -- we use our external deployment collector
+# in the otel namespace which fans out to ClickHouse, VictoriaMetrics, Loki, etc.
+opentelemetry-collector:
+  enabled: false
+
+# Disable observability backends -- Nudgebee stack handles metrics, logs, traces.
+# Jaeger is kept enabled (chart default) for side-by-side trace debugging.
+prometheus:
+  enabled: false
+grafana:
+  enabled: false
+opensearch:
+  enabled: false
+
+# Re-wire Jaeger SPM (Monitor tab) to point at the real Prometheus-compatible
+# endpoint and external otel-collector, since this values file disables the
+# chart's built-in `prometheus` and `opentelemetry-collector`. Without this
+# override the chart defaults (`prometheus:9090`, `otel-collector:4318`) fail
+# DNS lookup in the demo namespace and the Monitor tab errors out.
+#
+# normalize_calls/normalize_duration are flipped to false because the
+# spanmetrics in VictoriaMetrics are exported as `traces_span_metrics_calls`
+# (no `_total`) and `traces_span_metrics_duration_*` (no time-unit suffix).
+jaeger:
+  jaeger:
+    extraEnv:
+      - name: MEMORY_MAX_TRACES
+        value: "25000"
+      - name: PROMETHEUS_ADDR
+        value: <your-prometheus-compatible-endpoint>.<your-metrics-namespace>.svc.cluster.local:8429
+      - name: OTEL_COLLECTOR_HOST
+        value: <your-collector>.<your-otel-namespace>.svc.cluster.local
+      - name: OTEL_COLLECTOR_PORT_HTTP
+        value: "4318"
+      - name: JAEGER_HOST
+        value: "0.0.0.0"
+      - name: JAEGER_GRPC_PORT
+        value: "4317"
+  userconfig:
+    service:
+      extensions: [jaeger_storage, jaeger_query, healthcheckv2]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [jaeger_storage_exporter]
+      telemetry:
+        resource:
+          service.name: jaeger
+        metrics:
+          level: detailed
+          readers:
+            - periodic:
+                interval: 10000
+                timeout: 5000
+                exporter:
+                  otlp:
+                    protocol: http/protobuf
+                    endpoint: http://${env:OTEL_COLLECTOR_HOST}:${env:OTEL_COLLECTOR_PORT_HTTP}
+                    insecure: true
+        logs:
+          level: info
+    extensions:
+      healthcheckv2:
+        use_v2: true
+        http:
+          endpoint: 0.0.0.0:13133
+      jaeger_query:
+        storage:
+          traces: memory_backend
+          metrics: metrics_backend
+        base_path: /jaeger/ui
+      jaeger_storage:
+        backends:
+          memory_backend:
+            memory:
+              max_traces: ${env:MEMORY_MAX_TRACES}
+        metric_backends:
+          metrics_backend:
+            prometheus:
+              endpoint: "http://${env:PROMETHEUS_ADDR}"
+              normalize_calls: false
+              normalize_duration: false
+
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: ${env:JAEGER_HOST}:${env:JAEGER_GRPC_PORT}
+
+    processors:
+      batch:
+
+    exporters:
+      jaeger_storage_exporter:
+        trace_storage: memory_backend

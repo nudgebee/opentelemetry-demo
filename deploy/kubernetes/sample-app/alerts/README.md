@@ -12,35 +12,34 @@ cluster is rebuilt.
 ## Applying them
 
 ```bash
-kubectl apply -f deploy/kubernetes/sample-app/alerts/
+./deploy/kubernetes/sample-app/alerts/apply-alerts.sh --help
 ```
 
 `PrometheusRule` is used rather than VictoriaMetrics' own `VMRule` because it
 works with both stacks: prometheus-operator consumes it directly, and the
 VictoriaMetrics operator watches `PrometheusRule` and converts each one into
-an equivalent `VMRule` automatically. That was verified on our cluster by
-applying a throwaway `PrometheusRule` and watching the matching `VMRule`
-appear within seconds.
+an equivalent `VMRule` automatically. Verified by applying a throwaway
+`PrometheusRule` and watching the matching `VMRule` appear within seconds.
 
-Both files pin `namespace: victoria`, which is where the VictoriaMetrics
-operator runs in our environment. Change it to whichever namespace your
-operator or Prometheus watches. If the rule selector is empty it picks up
-every rule object in the namespaces it may read, so no extra labels are
-needed; otherwise match the selector.
+These files carry no `metadata.namespace`, so the `kubectl -n` you apply them
+with decides where the rule objects land. Put them wherever your
+prometheus-operator or VictoriaMetrics operator watches. If its rule selector
+is empty it picks up every rule object in the namespaces it can read, so no
+extra labels are needed; otherwise match the selector -- see `--release-label`.
 
-### If you deploy the demo outside the `demo` namespace
+### Two different namespaces, do not confuse them
 
-Every expression filters on `namespace="demo"`, matching the namespace the
-demo itself is deployed into. That is a different namespace from the one in
-the `metadata` above: `metadata.namespace` is where the rule object lives,
-while the `namespace="demo"` selector is where the metrics come from.
+`metadata.namespace` (set by `kubectl -n`) is where the rule OBJECT lives.
+The `namespace="demo"` selector inside every expression is where the METRICS
+come from. They are usually different, and getting the second one wrong is
+silent: a rule whose selector matches nothing never fires and never errors.
 
-If you install the demo somewhere else, edit that selector in **both** files
-or the rules will silently match nothing and never fire:
+Use `apply-alerts.sh` rather than editing expressions by hand:
 
 ```bash
-grep -rl 'namespace="demo"' deploy/kubernetes/sample-app/alerts/ \
-  | xargs sed -i 's/namespace="demo"/namespace="YOUR_NAMESPACE"/g'
+./apply-alerts.sh --demo-namespace <where-the-demo-runs> \
+                  --rules-namespace <where-your-operator-watches> \
+                  --release-label <your-kube-prometheus-stack-release>
 ```
 
 ## What is here, and why it is split in two
