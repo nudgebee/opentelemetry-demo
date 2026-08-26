@@ -167,7 +167,13 @@ $S --list                      # every flag and its variants
 $S postgresFailure on          # break the product catalog's database
 $S --check postgresFailure     # confirm flagd is really serving it
 $S --reset                     # all faults off
+$S --drain http://localhost:9090   # reset AND wait for alerts to clear
 ```
+
+Use `--drain`, not `--reset`, **between** scenarios. Investigations read
+traces from around the alert, so a fault that was erroring a minute ago ends
+up in the next scenario's evidence -- we hit exactly that, and it turned a
+clean result into `Root Cause: Undetermined`.
 
 `--check` matters. It asks flagd what it is actually serving, which separates
 three situations you otherwise cannot tell apart: the write did not land, the
@@ -180,11 +186,18 @@ correctly report that nothing is wrong now, having missed what already happened.
 
 ---
 
-## The three scenarios worth demoing
+## The scenarios worth demoing
+
+Five scenarios produce a signal. The three below are the headline ones;
+**full step-by-step walkthroughs with screenshots for all five are in
+[`docs/`](./docs/README.md)**, including the two payment scenarios that are
+detected indirectly.
 
 Full catalogue, including what does not work, in [`scenarios.yaml`](./scenarios.yaml).
 
 ### A. Database outage -- root cause and blast radius
+
+Full walkthrough: [`docs/01-database-outage.md`](./docs/01-database-outage.md)
 
 ```bash
 $S postgresFailure on
@@ -211,14 +224,22 @@ a measured offset.
 
 ### B. Memory leak -- crash analysis down to the line
 
+Full walkthrough: [`docs/02-memory-leak.md`](./docs/02-memory-leak.md)
+
 ```bash
 $S emailMemoryLeak 10000x
 $S loadGeneratorVUs 50          # more orders = faster leak
 ```
 
-The email service OOMKills in about 3 minutes and enters CrashLoopBackOff. This
-one needs no alert rules at all -- the kernel OOM killer is the signal, so it is
-the most deterministic scenario in the set.
+The email service OOMKills in under 30 seconds and enters CrashLoopBackOff 75
+seconds after that. This one needs no alert rules at all -- the kernel OOM
+killer is the signal, so it is the most deterministic scenario in the set.
+
+Expect the RCA to blame the 100Mi memory limit rather than the leak. Its
+evidence is anon-RSS at the moment of the kill, which is circular -- measured
+baseline with the leak off is ~55Mi, so the limit is fine. Do not raise it;
+see the
+[walkthrough](./docs/02-memory-leak.md#expect-the-rca-to-blame-the-memory-limit).
 
 Scored **69 / P1**, and the report shows its own arithmetic:
 
@@ -235,6 +256,8 @@ sending the confirmation email, so a payment failure starves the leak of traffic
 
 ### C. Slow dependency -- the alert that names the cause
 
+Full walkthrough: [`docs/03-slow-dependency.md`](./docs/03-slow-dependency.md)
+
 ```bash
 $S postgresSlow 6sec
 ```
@@ -246,7 +269,23 @@ This is the correlation story. Symptom rules only ever alert on a slow
 dependency's *callers*, so a slow database looks like several slow services with
 nothing naming the cause. The dependency rule closes that gap.
 
-Use `6sec` -- `1sec` and `3sec` do not cross the 5s latency threshold.
+Use `6sec` to fire both rules. The dependency rule
+(`OtelDemoPostgresQueryLatencyHigh`) triggers at a **100ms** mean, so `1sec`
+also fires it; only `OtelDemoHighLatency` (HTTP p95 > 5s) needs `6sec`.
+
+### D and E. The payment scenarios -- detected on the caller
+
+```bash
+$S paymentFailure 100%          # docs/04-payment-failure.md
+$S paymentUnreachable on        # docs/05-payment-unreachable.md
+```
+
+Both fire `OtelDemoGRPCServerErrorRate` on **checkout**, never on `payment` --
+`payment` emits no gRPC server metrics, so no rule can fire against it. Good
+for demonstrating blast-radius reasoning, provided you say that up front.
+
+Do not run `paymentFailure` alongside `emailMemoryLeak`: checkout charges the
+card before sending the confirmation email, so it starves the leak of traffic.
 
 ---
 

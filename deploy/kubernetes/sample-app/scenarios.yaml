@@ -90,6 +90,15 @@ scenarios:
       Do not switch this to a quantile rule -- see alerts/README.md for why the
       bucket boundaries make histogram_quantile meaningless here.
 
+      WAIT ~10 MIN BEFORE JUDGING THE RCA. The investigation runs a fast pass
+      then a deeper pass that overwrites it in place, and nothing in the UI
+      says which one you are reading. Measured 2026-08-26: alert 17:45:34,
+      early pass said "Undetermined -- insufficient evidence", final
+      investigation written 17:54:38 and named SELECT pg_sleep($1) against
+      astronomy-db with two trace IDs, a healthy-query comparison
+      (140-330us) and CPU ruled out at 0.002-0.005 cores. Best evidence
+      section of any scenario here.
+
   - flag: emailMemoryLeak
     variant: 10000x
     service: email
@@ -99,14 +108,24 @@ scenarios:
     detected_as:
       - { event: OOMKilled, source: kubernetes_api_server, on: email }
       - { event: CrashLoopBackOff, source: kubernetes_api_server, on: email, after: ~75s }
-    detection_time: ~3 min from trigger to OOMKill
+    detection_time: under 30s at loadGeneratorVUs=50 (measured 15-46s)
     objective_check: 'kubectl -n demo get pod -l app.kubernetes.io/name=email -o jsonpath="{.items[0].status.containerStatuses[0].lastState.terminated.reason}" -> OOMKilled'
     notes: >
       The most deterministic scenario: no alert rules, no thresholds, no
       metric-coverage caveats -- the kernel OOM killer is the signal. Scored
       69 / P1, far above the error-rate scenarios, and the report exposes the
       full score breakdown (base 62, non_prod -8, likely_root_cause +15).
-      Raise loadGeneratorVUs to 50 to make it OOM in minutes.
+      Raise loadGeneratorVUs to 50 to drive order volume.
+
+      EXPECT THE RCA TO BLAME THE 100Mi LIMIT rather than the leak: "Resource
+      Under-Provisioning ... no in-code memory leak when the emailMemoryLeak
+      flag is off". Its evidence is anon-rss ~98.8MiB from the kernel OOM log,
+      which is circular -- a container always sits near its limit when the OOM
+      killer fires. Measured control (2026-08-26): leak OFF at VUs=50 is flat
+      at ~55Mi over a 9 min soak, 0 restarts, so ~45Mi of real headroom. The
+      100Mi limit is correct; do NOT raise it. We tried 192Mi and the leak just
+      grows to fill that instead, producing the same diagnosis with a bigger
+      number. Useful as a reproducible example of a confident wrong RCA.
     conflicts_with:
       - flag: paymentFailure
         why: >
