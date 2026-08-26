@@ -79,11 +79,10 @@ answer is `payment`, and the trace data is what bridges them.
 
 Good follow-up questions for **Ask a follow up**:
 
-> Which downstream dependency of checkout is actually failing, and what
-> error is it returning?
-
-> Using the annotated source repository, show me where checkout calls the
-> payment service during PlaceOrder.
+- *Which downstream dependency of checkout is actually failing, and what
+  error is it returning?*
+- *Using the annotated source repository, show me where checkout calls the
+  payment service during PlaceOrder.*
 
 ## Clean up
 
