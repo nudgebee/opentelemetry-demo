@@ -7,6 +7,9 @@ the release.
 
 ## Unreleased
 
+* [flagd-ui] Fix high gRPC client error rate from ad calling flagd.evaluation.v2.Service/EventStream by using atomic file writes for `demo.flagd.json`
+  ([#509](https://github.com/open-telemetry/opentelemetry-demo/pull/509))
+
 * [recommendation] Fix `recommendationCacheFailure` feature flag by
   using `ListProducts` instead of `GetProduct`
   ([#3260](https://github.com/open-telemetry/opentelemetry-demo/pull/3260))

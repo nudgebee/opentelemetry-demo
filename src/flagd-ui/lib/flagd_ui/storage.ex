@@ -64,7 +64,9 @@ defmodule FlagdUi.Storage do
   end
 
   defp write_state(json_string) do
-    File.write!(@file_path, json_string)
+    tmp_path = "#{@file_path}.tmp"
+    File.write!(tmp_path, json_string)
+    File.rename!(tmp_path, @file_path)
 
     Logger.info("Wrote new state to file")
   end
