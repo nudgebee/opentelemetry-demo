@@ -24,6 +24,39 @@ reproducible on demand and switch off cleanly.
 
 ---
 
+## How the signals actually reach NudgeBee
+
+Read this before installing anything. Two of the four paths are automatic and
+two of them you have to build, and the ones you have to build fail **silently**
+when you skip them -- everything looks installed and healthy, and NudgeBee just
+never raises an event.
+
+| Signal | Path | Who wires it |
+| --- | --- | --- |
+| Traces | app -> node agent (eBPF), read straight off the host | automatic |
+| Kubernetes events (OOMKill, CrashLoopBackOff) | agent watches the API server | automatic |
+| **Metrics** | demo -> OTLP -> collector -> **your metrics backend** -> agent queries it | **you** |
+| **Alerts** | your Alertmanager -> agent's `/api/alerts` webhook | **you** |
+
+The metrics row is the one that catches people, because of an asymmetry that
+looks like a bug and is not:
+
+> **Traces arriving while metrics do not is the expected symptom of an
+> unconnected metrics path**, not a partial outage. Traces come from the node
+> agent via eBPF and need nothing from you. Metrics travel the OTLP pipeline and
+> stop wherever you point the collector.
+
+Out of the box the demo chart is **self-contained**: it deploys its own
+collector, Prometheus, Grafana, Jaeger and OpenSearch, and the collector ships
+metrics to that bundled Prometheus. That is a closed loop. Nothing forwards it
+to the backend NudgeBee reads, so the agent queries your real Prometheus, finds
+no demo series, and every alert rule evaluates cleanly forever without firing.
+
+**Connecting the metrics path is step 2 below. It is a requirement, not a
+tuning option.**
+
+---
+
 ## Before you start
 
 | Requirement | Notes |
@@ -32,6 +65,8 @@ reproducible on demand and switch off cleanly.
 | Helm 3 | |
 | NudgeBee account | [app.nudgebee.com](https://app.nudgebee.com) or self-hosted |
 | NudgeBee agent installed | See the section below -- **read the gotchas, several are silent** |
+| A metrics backend NudgeBee can query | Prometheus, VictoriaMetrics, Mimir, Thanos... The demo must write into **this**, not into its own bundled Prometheus. See step 2. |
+| Its write endpoint | Remote-write URL, or a scrape config you control. Needed to connect the demo. |
 
 ---
 
@@ -103,6 +138,9 @@ helm upgrade --install otel-demo open-telemetry/opentelemetry-demo \
   -f deploy/kubernetes/sample-app/values.yaml
 ```
 
+This alone gives you a **self-contained** demo whose metrics never leave the
+namespace. Step 2 connects them. Do not skip it and do not stop here.
+
 `values.yaml` is not cosmetic. It sets CPU limits so throttling is measurable,
 tightens memory so leaks reach OOM in minutes rather than hours, wires a
 readiness probe, and drops the metric export interval from 60s to 15s -- which is
@@ -115,6 +153,49 @@ kubectl -n demo port-forward deploy/frontend-proxy 8080:8080
 curl -s -o /dev/null -w '%{http_code} %{time_total}s\n' \
   'http://localhost:8080/api/products?currencyCode=USD'   # expect 200, <1s
 ```
+
+---
+
+## 2b. Connect the demo's metrics to your stack
+
+**Required.** Until you do this, the demo writes metrics to its own bundled
+Prometheus, NudgeBee queries yours, and no alert rule can ever fire.
+
+Pick the row that matches your setup. All three are worked examples in this
+directory; each is a second `-f` on the same `helm upgrade`.
+
+| Your setup | Use | What you supply |
+| --- | --- | --- |
+| Prometheus / VictoriaMetrics / Mimir / Thanos | [`values-remote-write.example.yaml`](./values-remote-write.example.yaml) | one remote-write URL |
+| Prometheus you scrape with, via Operator | [`values-scrape.example.yaml`](./values-scrape.example.yaml) | a ServiceMonitor with your release label |
+| You already run an OTel collector | [`values-external-collector.example.yaml`](./values-external-collector.example.yaml) | your collector's service DNS |
+
+**Remote-write is the recommended default.** It is one value, it is push-based
+so there is no scrape config or label-selector to get wrong, and the endpoint is
+usually the same host you already gave the NudgeBee agent:
+
+```bash
+helm upgrade --install otel-demo open-telemetry/opentelemetry-demo \
+  --namespace demo --create-namespace \
+  -f deploy/kubernetes/sample-app/values.yaml \
+  -f deploy/kubernetes/sample-app/values-remote-write.example.yaml
+```
+
+Plain Prometheus needs `--web.enable-remote-write-receiver` (v2.33+) to accept
+it. VictoriaMetrics, Mimir, Thanos and Grafana Cloud accept remote-write with no
+extra flag.
+
+### Verify it, do not assume it
+
+This is the step that fails silently, so prove it:
+
+```bash
+./deploy/kubernetes/sample-app/scenario.sh --check-metrics http://<your-prometheus>:9090
+```
+
+It queries the backend NudgeBee reads for the demo's own series. Zero means the
+metrics path is not connected, whatever the pods look like. Do not continue to
+step 3 until this returns a non-zero count.
 
 ---
 
@@ -322,11 +403,37 @@ first three.
 
 | Check | How |
 | --- | --- |
+| **Do the demo's metrics reach your backend?** | `scenario.sh --check-metrics <PROM_URL>` -- **start here**, it is the most common cause and the only one that is completely silent |
 | Is the flag really served? | `scenario.sh --check <flag>` |
 | Did the fault actually happen? | `curl` the storefront, or `kubectl get pod` for OOM |
 | Can alerts reach NudgeBee? | the `curl` in step 1; look for `Watchdog` |
 | Are rules loaded? | Prometheus **Status -> Rules** -- not just `kubectl get prometheusrule` |
+| Do the rules select YOUR namespace? | The PromQL hardcodes `namespace="demo"`. `apply-alerts.sh --demo-namespace <ns>` rewrites it; applying the YAML directly does not. |
 | Is the service even instrumented? | see below |
+
+### "Traces are arriving but metrics are not"
+
+This is not a partial outage. It is the exact signature of an unconnected
+metrics path, and it has cost more than one person an afternoon.
+
+Traces reach NudgeBee through the node agent, which reads them off the host with
+eBPF and needs nothing from you. Metrics travel the OTLP pipeline and stop
+wherever the collector points -- by default, the demo's own bundled Prometheus,
+which nothing forwards to your backend. So traces arrive, metrics do not, the
+alert rule evaluates cleanly forever, and nothing anywhere logs an error.
+
+Do not go looking for a ServiceMonitor the agent failed to create. A correctly
+working install has none: the metrics path here is push-based, not discovered.
+
+Confirm what the app is actually talking to:
+
+```bash
+kubectl -n <ns> get deploy product-catalog \
+  -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="OTEL_COLLECTOR_NAME")].value}'
+```
+
+A bare `otel-collector` is the chart default and means in-namespace, i.e. a dead
+end. Fix it with step 2b -- no reinstall needed, just another `helm upgrade`.
 
 **Only `ad`, `checkout` and `product-catalog` emit gRPC server metrics.**
 `cart`, `payment`, `currency`, `shipping`, `recommendation`, `quote` and `email`
