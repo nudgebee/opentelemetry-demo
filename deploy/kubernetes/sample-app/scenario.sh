@@ -11,7 +11,14 @@
 #   ./scenario.sh <flag> [variant]       enable (variant defaults to "on")
 #   ./scenario.sh <flag> off             disable
 #   ./scenario.sh --check <flag>         ask flagd what it is SERVING for this flag
+#   ./scenario.sh --targeting <flag>     show the flag's targeting rule and whether
+#                                        it can ever be enabled at all
 #   ./scenario.sh --reset                turn every fault flag off
+#   ./scenario.sh --drain [PROM_URL]     reset, wait for OtelDemo alerts to
+#                                        resolve, then settle -- ALWAYS do this
+#                                        between scenarios, or the previous
+#                                        fault's traces contaminate the next
+#                                        investigation's evidence
 #
 #   --namespace NS                       demo namespace (default: demo, or $DEMO_NAMESPACE)
 #
@@ -131,13 +138,113 @@ print("note: loadGeneratorTraffic / loadGeneratorVUs are normal traffic controls
            -X POST -H 'Content-Type: application/json' -d '{}' 2>/dev/null; then break; fi
     done
     echo "flagd is serving:"
-    curl -s -X POST -H 'Content-Type: application/json' -d '{}' \
-      "http://localhost:${LP}/ofrep/v1/evaluate/flags/${FLAG}" | python3 -m json.tool 2>/dev/null \
+    RESP="$(curl -s -X POST -H 'Content-Type: application/json' -d '{}' \
+      "http://localhost:${LP}/ofrep/v1/evaluate/flags/${FLAG}")" \
       || die "could not evaluate '$FLAG' (is the flag name right?)"
+    printf '%s' "$RESP" | python3 -m json.tool 2>/dev/null || die "could not evaluate '$FLAG'"
     echo
+    # A TARGETING_MATCH reason means the answer above came from a targeting rule
+    # evaluated against an EMPTY context, not from defaultVariant -- so it says
+    # little about what the app sees, and the flag may be untoggleable outright.
+    # productCatalogFailure ships from upstream with
+    #   {"if": [{"==": [{"var":"product_id"},"OLJCESPC7Z"]}, "off", "off"]}
+    # where BOTH branches return "off", so it can never evaluate to on no matter
+    # what you set defaultVariant to. Without this check that presents as "the
+    # flag is on and nothing happened", which is indistinguishable from a
+    # monitoring gap.
+    if printf '%s' "$RESP" | grep -q '"reason":"TARGETING_MATCH"'; then
+      echo "NOTE: this flag has TARGETING rules, so the value above was resolved"
+      echo "      against an empty context and is not necessarily what the app"
+      echo "      sees. Check the rule before trusting it:"
+      echo "        $0 --targeting ${FLAG}"
+    fi
     echo "If 'value' looks right but the demo behaves normally, the SERVICE is not"
     echo "reading it -- see the notes at the top of this script. Do not assume the"
     echo "monitoring missed something until you have ruled that out."
+    exit 0 ;;
+
+  --targeting)
+    FLAG="${2:-}"; [ -n "$FLAG" ] || die "--targeting needs a flag name"
+    live_json | FLAG="$FLAG" python3 -c '
+import json,os,sys
+flag=os.environ["FLAG"]
+f=json.load(sys.stdin)["flags"].get(flag)
+if f is None: sys.exit("unknown flag: %s" % flag)
+print("defaultVariant:", f.get("defaultVariant"))
+print("variants      :", f.get("variants"))
+t=f.get("targeting")
+if not t:
+    print("targeting     : none -- defaultVariant is what gets served")
+    raise SystemExit
+print("targeting     :", json.dumps(t))
+variants=set(f.get("variants",{}))
+outs=set()
+def walk(o):
+    if isinstance(o,dict):
+        for k,v in o.items():
+            if k=="if":
+                for br in v:
+                    if isinstance(br,str): outs.add(br)
+                    else: walk(br)
+            else: walk(v)
+    elif isinstance(o,list):
+        for i in o: walk(i)
+walk(t)
+reach=sorted(outs & variants)
+print("reachable     :", reach)
+if reach and set(reach) <= {"off"}:
+    print()
+    print("DEGENERATE: every branch of this rule returns off, so the flag can")
+    print("never be enabled. Setting defaultVariant does nothing -- targeting wins.")
+'
+    exit 0 ;;
+
+  --drain)
+    # Reset, then wait until the previous scenario has genuinely stopped
+    # producing signal. This matters more than it sounds: an investigation
+    # reads traces from around its alert, so a fault that was erroring a
+    # minute ago lands in the NEXT scenario's evidence. We reproduced that --
+    # starting postgresSlow 80s after postgresFailure gave an investigation
+    # full of "PostgreSQL unavailable" errors that concluded
+    # "Root Cause: Undetermined". The analysis was fresh and correct about
+    # what it saw; the window was contaminated.
+    "$0" --reset || exit 1
+    echo
+
+    PROM="${2:-${PROM_URL:-}}"
+    SETTLE="${DRAIN_SETTLE:-300}"
+
+    if [ -n "$PROM" ]; then
+      echo "Waiting for OtelDemo alerts to resolve at $PROM ..."
+      Q='ALERTS{alertname=~"OtelDemo.*",alertstate="firing"}'
+      N=0
+      while [ "$N" -lt 60 ]; do
+        BODY="$(curl -sG --data-urlencode "query=$Q" "$PROM/api/v1/query" 2>/dev/null || true)"
+        COUNT="$(printf '%s' "$BODY" | python3 -c '
+import json,sys
+try: print(len(json.load(sys.stdin)["data"]["result"]))
+except Exception: print("?")
+' 2>/dev/null)"
+        case "$COUNT" in
+          0) echo "  all OtelDemo alerts resolved."; break ;;
+          '?') echo "  WARNING: could not query $PROM -- check the URL"; break ;;
+          *) echo "  $COUNT still firing; waiting..." ;;
+        esac
+        sleep 20; N=$((N+1))
+      done
+    else
+      echo "No Prometheus URL given, so alert state cannot be confirmed."
+      echo "Pass one, or set PROM_URL, to have this wait for real:"
+      echo "    $0 --drain http://localhost:9090"
+      echo
+      echo "Otherwise verify by hand that this returns nothing:"
+      echo '    ALERTS{alertname=~"OtelDemo.*", alertstate="firing"}'
+    fi
+
+    echo
+    echo "Settling for ${SETTLE}s so the trace window is clean (DRAIN_SETTLE to change)..."
+    sleep "$SETTLE"
+    echo "Drained. Safe to start the next scenario."
     exit 0 ;;
 
   --reset) FLAG="__RESET__"; VARIANT="off" ;;
