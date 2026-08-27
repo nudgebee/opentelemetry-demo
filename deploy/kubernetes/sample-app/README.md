@@ -47,7 +47,7 @@ configures Alertmanager, so nothing routes alerts to NudgeBee. You will need the
 receiver in [`alertmanager-receiver.yaml`](./alertmanager-receiver.yaml).
 
 **If you did not name the release `nudgebee-agent` in namespace
-`nudgebee-agent`, your alerts go nowhere.** The agent's `extra-scrape-config.yaml`
+`nudgebee-agent`, your alerts go nowhere.** The agent's `kube-prometheus-stack-values.yaml`
 hardcodes `http://nudgebee-agent-runner.nudgebee-agent.svc/api/alerts`, while the
 chart names the Service `<release>-runner`. Check yours:
 
