@@ -7,6 +7,7 @@ the release.
 
 ## Unreleased
 
+* [ad] Increase flagd gRPC deadline to 15000ms to prevent DEADLINE_EXCEEDED errors during flagd startup
 * [recommendation] Fix `recommendationCacheFailure` feature flag by
   using `ListProducts` instead of `GetProduct`
   ([#3260](https://github.com/open-telemetry/opentelemetry-demo/pull/3260))
