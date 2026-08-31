@@ -274,3 +274,12 @@ components:
         memory: 256Mi
       limits:
         memory: 256Mi
+
+  load-generator:
+    resources:
+      requests:
+        cpu: 200m
+        memory: 1Gi
+      limits:
+        cpu: 500m
+        memory: 1Gi
