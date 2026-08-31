@@ -14,10 +14,10 @@
 #
 #   helm upgrade --install nudgebee-prometheus prometheus-community/kube-prometheus-stack \
 #     -n nudgebee-agent --create-namespace ... \
-#     -f https://raw.githubusercontent.com/nudgebee/k8s-agent/main/extra-scrape-config.yaml
+#     -f https://raw.githubusercontent.com/nudgebee/k8s-agent/main/kube-prometheus-stack-values.yaml
 #
-# then extra-scrape-config.yaml ALREADY added the receiver below for you, and
-# you can skip this file entirely. Check before adding a second one:
+# then kube-prometheus-stack-values.yaml ALREADY added the receiver below for
+# you, and you can skip this file entirely. Check before adding a second one:
 #
 #   kubectl -n nudgebee-agent get secret \
 #     alertmanager-nudgebee-prometheus-kube-p-alertmanager -o \
@@ -29,7 +29,7 @@
 #      say "already have Prometheus? you just need its URL" -- true for metrics,
 #      but it also means nothing ever wired your Alertmanager. This is the
 #      normal situation on any real cluster.
-#   2. You renamed the Helm release. The URL in extra-scrape-config.yaml is
+#   2. You renamed the Helm release. The URL in that values file is
 #      HARDCODED to nudgebee-agent-runner.nudgebee-agent.svc, while the chart
 #      names the Service {{ fullname }}-runner. Those agree only when the
 #      release is called exactly `nudgebee-agent` in namespace `nudgebee-agent`.
