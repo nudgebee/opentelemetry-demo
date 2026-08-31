@@ -1,0 +1,81 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Send the demo's metrics to YOUR metrics backend by remote-write.
+#
+# This is the recommended way to connect the demo to an existing stack. One
+# value to set, push-based, and it works the same against Prometheus,
+# VictoriaMetrics, Mimir, Thanos and Grafana Cloud.
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# The demo chart is self-contained by default: it deploys its own Prometheus and
+# the collector ships metrics there. That is a closed loop. NudgeBee queries YOUR
+# backend, finds no demo series, and every alert rule evaluates cleanly forever
+# without firing -- with no error anywhere to tell you why.
+#
+# Note that traces still arrive in that broken state, because NudgeBee's node
+# agent reads them off the host with eBPF and never touches this pipeline. Traces
+# working while metrics do not is the signature of exactly this problem.
+#
+# USE IT
+# ------
+#   helm upgrade --install otel-demo open-telemetry/opentelemetry-demo \
+#     --namespace demo --create-namespace \
+#     -f deploy/kubernetes/sample-app/values.yaml \
+#     -f deploy/kubernetes/sample-app/values-remote-write.example.yaml
+#
+# Then PROVE it, because this is the step that fails quietly:
+#
+#   ./deploy/kubernetes/sample-app/scenario.sh --check-metrics http://<your-prometheus>:9090
+#
+# RECEIVER REQUIREMENTS
+# ---------------------
+# Plain Prometheus rejects remote-write unless started with
+# `--web.enable-remote-write-receiver` (v2.33+). VictoriaMetrics, Mimir, Thanos
+# and Grafana Cloud need no extra flag.
+#
+# Typical endpoints:
+#   Prometheus       http://<prom>.<ns>.svc:9090/api/v1/write
+#   VictoriaMetrics  http://<vminsert>.<ns>.svc:8480/insert/0/prometheus/api/v1/write
+#   Mimir / Thanos   http://<endpoint>/api/v1/push
+
+opentelemetry-collector:
+  config:
+    exporters:
+      prometheusremotewrite:
+        # REPLACE THIS. It is usually the same backend you gave the NudgeBee
+        # agent as its Prometheus URL.
+        endpoint: http://REPLACE-ME.monitoring.svc:9090/api/v1/write
+        tls:
+          insecure: true
+        # Keeps k8s attributes (namespace, pod, deployment) as metric labels.
+        # Without this the alert rules cannot select by namespace and nothing
+        # fires even though the series exist.
+        resource_to_telemetry_conversion:
+          enabled: true
+
+    service:
+      pipelines:
+        metrics:
+          # Helm REPLACES lists rather than merging them, so this is the whole
+          # exporter list for the metrics pipeline. Dropping the chart's
+          # `otlp_http/prometheus` is deliberate -- it targets the bundled
+          # Prometheus, which is the dead end this file exists to avoid.
+          exporters:
+            - prometheusremotewrite
+            - debug
+
+# The bundled backends are redundant once metrics go to your stack, and the
+# collector DaemonSet is the largest thing the demo deploys. Turning them off
+# frees real capacity -- on a cluster with no headroom its pods sit Pending and
+# the demo looks broken for an unrelated reason.
+#
+# Keep jaeger enabled if you want the demo's own trace UI; NudgeBee does not
+# need it.
+prometheus:
+  enabled: false
+grafana:
+  enabled: false
+opensearch:
+  enabled: false

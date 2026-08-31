@@ -9,12 +9,29 @@
 # are tempted to drop something, check `scenarios.yaml` first -- several of
 # these are the only reason a given scenario produces a signal at all.
 #
-# Observability backends are deliberately left at CHART DEFAULTS (the demo's own
-# collector, Prometheus, Grafana, Jaeger and OpenSearch all stay enabled). That
-# keeps the demo self-contained and working out of the box, and lets NudgeBee's
-# agent scrape it independently. Disabling them is an optimisation for people who
-# already run a stack, not a prerequisite -- see values-external-stack.example.yaml for a
-# worked example of doing that.
+# Observability backends are left at CHART DEFAULTS here, which makes this file
+# on its own a SELF-CONTAINED demo: its own collector, Prometheus, Grafana,
+# Jaeger and OpenSearch, with the collector shipping metrics to that bundled
+# Prometheus.
+#
+# THAT IS A CLOSED LOOP, AND IT IS NOT ENOUGH TO TEST NUDGEBEE.
+#
+# NudgeBee queries YOUR metrics backend. Nothing forwards the bundled Prometheus
+# to it, so the agent finds no demo series and every alert rule evaluates
+# cleanly forever without firing -- with no error anywhere saying why. Traces
+# still arrive throughout, because the node agent reads those off the host with
+# eBPF and never touches this pipeline; traces working while metrics do not is
+# the signature of precisely this gap.
+#
+# So layer a SECOND values file on top to connect metrics to your stack. This is
+# a required step, not an optimisation:
+#
+#   values-remote-write.example.yaml        recommended; one URL, any backend
+#   values-scrape.example.yaml              if you prefer pull-based collection
+#   values-external-collector.example.yaml  if you already run an OTel collector
+#
+# Then prove it landed:
+#   ./scenario.sh --check-metrics http://<your-prometheus>:9090
 #
 #   helm upgrade --install otel-demo open-telemetry/opentelemetry-demo \
 #     --namespace demo --create-namespace \
