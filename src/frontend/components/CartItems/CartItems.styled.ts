@@ -10,19 +10,11 @@ export const CartItems = styled.section`
 
 export const CardItemsHeader = styled.div`
   display: grid;
-  grid-template-columns: 150px 100px auto auto;
+  grid-template-columns: 150px 100px auto;
   gap: 24px;
 
   ${({ theme }) => theme.breakpoints.desktop} {
-    grid-template-columns: 1fr 120px 110px 110px;
-  }
-
-  > label:nth-child(2) {
-    text-align: center;
-  }
-
-  > label:nth-child(n+3) {
-    text-align: right;
+    grid-template-columns: 1fr auto auto;
   }
 `;
 
@@ -40,23 +32,14 @@ export const CartItemImage = styled.img`
 
 export const CartItem = styled.div`
   display: grid;
-  grid-template-columns: 150px 100px auto auto;
+  grid-template-columns: 150px 100px auto;
   gap: 24px;
   padding: 24px 0;
   align-items: center;
   border-bottom: 1px solid ${({ theme }) => theme.colors.textLightGray};
 
   ${({ theme }) => theme.breakpoints.desktop} {
-    grid-template-columns: 1fr 120px 110px 110px;
-  }
-
-  > :nth-child(2) {
-    display: flex;
-    justify-content: center;
-  }
-
-  > :nth-child(n+3) {
-    align-items: flex-end;
+    grid-template-columns: 1fr auto auto;
   }
 `;
 
@@ -82,7 +65,7 @@ export const NameContainer = styled.div`
 export const PriceContainer = styled.div`
   display: flex;
   width: 100%;
-  justify-content: flex-end;
+  justify-content: space-between;
 `;
 
 export const DataRow = styled.div`
