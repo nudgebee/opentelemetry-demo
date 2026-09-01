@@ -1,48 +1,19 @@
 # Copyright The OpenTelemetry Authors
 # SPDX-License-Identifier: Apache-2.0
 
-# OpenTelemetry demo values for testing NudgeBee.
+# Nudgebee Demo Environment - OpenTelemetry Demo Helm Values
 #
-# PORTABLE. Nothing here refers to any particular cluster, monitoring stack or
-# namespace, so it works as-is anywhere. Every setting exists for one of two
-# reasons: to make a scenario detectable, or to make it detectable FAST. If you
-# are tempted to drop something, check `scenarios.yaml` first -- several of
-# these are the only reason a given scenario produces a signal at all.
-#
-# Observability backends are left at CHART DEFAULTS here, which makes this file
-# on its own a SELF-CONTAINED demo: its own collector, Prometheus, Grafana,
-# Jaeger and OpenSearch, with the collector shipping metrics to that bundled
-# Prometheus.
-#
-# THAT IS A CLOSED LOOP, AND IT IS NOT ENOUGH TO TEST NUDGEBEE.
-#
-# NudgeBee queries YOUR metrics backend. Nothing forwards the bundled Prometheus
-# to it, so the agent finds no demo series and every alert rule evaluates
-# cleanly forever without firing -- with no error anywhere saying why. Traces
-# still arrive throughout, because the node agent reads those off the host with
-# eBPF and never touches this pipeline; traces working while metrics do not is
-# the signature of precisely this gap.
-#
-# So layer a SECOND values file on top to connect metrics to your stack. This is
-# a required step, not an optimisation:
-#
-#   values-remote-write.example.yaml        recommended; one URL, any backend
-#   values-scrape.example.yaml              if you prefer pull-based collection
-#   values-external-collector.example.yaml  if you already run an OTel collector
-#
-# Then prove it landed:
-#   ./scenario.sh --check-metrics http://<your-prometheus>:9090
-#
-#   helm upgrade --install otel-demo open-telemetry/opentelemetry-demo \
-#     --namespace demo --create-namespace \
-#     -f deploy/kubernetes/sample-app/values.yaml
-#
-# Overrides use `envOverrides` rather than `env` so they upsert into the chart's
-# default env list instead of replacing it. That stops this file breaking every
-# time the chart adds a new variable.
+# Minimal overrides from chart defaults. Per-component env vars come from
+# chart defaults automatically. Using envOverrides (not env) to upsert
+# without replacing the full default env list. This prevents breakage when
+# the chart adds new env vars in future versions.
 
 default:
   envOverrides:
+    # Point all services to our external OTel Collector (in otel namespace)
+    # instead of the chart's built-in collector
+    - name: OTEL_COLLECTOR_NAME
+      value: otel-deployment-collector-collector.otel.svc.cluster.local
     # Set resource attributes for service discovery and grouping
     - name: OTEL_RESOURCE_ATTRIBUTES
       value: 'service.name=$(OTEL_SERVICE_NAME),service.namespace=opentelemetry-demo,service.version={{ .Chart.AppVersion }}'
@@ -60,6 +31,103 @@ default:
     # which is immaterial at demo scale.
     - name: OTEL_METRIC_EXPORT_INTERVAL
       value: "15000"
+
+# Disable built-in OTel Collector -- we use our external deployment collector
+# in the otel namespace which fans out to ClickHouse, VictoriaMetrics, Loki, etc.
+opentelemetry-collector:
+  enabled: false
+
+# Disable observability backends -- Nudgebee stack handles metrics, logs, traces.
+# Jaeger is kept enabled (chart default) for side-by-side trace debugging.
+prometheus:
+  enabled: false
+grafana:
+  enabled: false
+opensearch:
+  enabled: false
+
+# Re-wire Jaeger SPM (Monitor tab) to point at the real Prometheus-compatible
+# endpoint and external otel-collector, since this values file disables the
+# chart's built-in `prometheus` and `opentelemetry-collector`. Without this
+# override the chart defaults (`prometheus:9090`, `otel-collector:4318`) fail
+# DNS lookup in the demo namespace and the Monitor tab errors out.
+#
+# normalize_calls/normalize_duration are flipped to false because the
+# spanmetrics in VictoriaMetrics are exported as `traces_span_metrics_calls`
+# (no `_total`) and `traces_span_metrics_duration_*` (no time-unit suffix).
+jaeger:
+  jaeger:
+    extraEnv:
+      - name: MEMORY_MAX_TRACES
+        value: "25000"
+      - name: PROMETHEUS_ADDR
+        value: vmsingle-victoria-victoria-metrics-k8s-stack.victoria.svc.cluster.local:8429
+      - name: OTEL_COLLECTOR_HOST
+        value: otel-deployment-collector-collector.otel.svc.cluster.local
+      - name: OTEL_COLLECTOR_PORT_HTTP
+        value: "4318"
+      - name: JAEGER_HOST
+        value: "0.0.0.0"
+      - name: JAEGER_GRPC_PORT
+        value: "4317"
+  userconfig:
+    service:
+      extensions: [jaeger_storage, jaeger_query, healthcheckv2]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [jaeger_storage_exporter]
+      telemetry:
+        resource:
+          service.name: jaeger
+        metrics:
+          level: detailed
+          readers:
+            - periodic:
+                interval: 10000
+                timeout: 5000
+                exporter:
+                  otlp:
+                    protocol: http/protobuf
+                    endpoint: http://${env:OTEL_COLLECTOR_HOST}:${env:OTEL_COLLECTOR_PORT_HTTP}
+                    insecure: true
+        logs:
+          level: info
+    extensions:
+      healthcheckv2:
+        use_v2: true
+        http:
+          endpoint: 0.0.0.0:13133
+      jaeger_query:
+        storage:
+          traces: memory_backend
+          metrics: metrics_backend
+        base_path: /jaeger/ui
+      jaeger_storage:
+        backends:
+          memory_backend:
+            memory:
+              max_traces: ${env:MEMORY_MAX_TRACES}
+        metric_backends:
+          metrics_backend:
+            prometheus:
+              endpoint: "http://${env:PROMETHEUS_ADDR}"
+              normalize_calls: false
+              normalize_duration: false
+
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: ${env:JAEGER_HOST}:${env:JAEGER_GRPC_PORT}
+
+    processors:
+      batch:
+
+    exporters:
+      jaeger_storage_exporter:
+        trace_storage: memory_backend
 
 # Per-component infrastructure overrides.
 #
@@ -101,6 +169,25 @@ components:
   # container loudly if that anchor ever changes, rather than silently starting
   # flagd without the postgres flags.
   flagd:
+    resources:
+      limits:
+        cpu: 100m
+        memory: 256Mi
+      requests:
+        cpu: 10m
+        memory: 180Mi
+    readinessProbe:
+      httpGet:
+        path: /readyz
+        port: 8015
+      initialDelaySeconds: 5
+      periodSeconds: 10
+    livenessProbe:
+      httpGet:
+        path: /healthz
+        port: 8015
+      initialDelaySeconds: 10
+      periodSeconds: 10
     initContainers:
       - name: init-config
         # Pinned rather than the chart default's floating `busybox`, so the
@@ -146,6 +233,16 @@ components:
           - mountPath: /config-rw
             name: config-rw
 
+  # fraud-detection — add resource limits and requests for stability
+  fraud-detection:
+    resources:
+      limits:
+        cpu: 200m
+        memory: 300Mi
+      requests:
+        cpu: 100m
+        memory: 300Mi
+
   # product-catalog — fork-built image adds the `postgresFailure` fault-injection
   # flag (stock `ghcr.io/open-telemetry/demo` has no such flag). pullPolicy Always
   # so the rolling `latest-*` tag is re-pulled on restart.
@@ -158,16 +255,6 @@ components:
   # memory bumped 20Mi → 64Mi: the fork image links the postgres driver + otelsql
   # and needs a little more headroom to start.
   product-catalog:
-    # ROLLING TAG -- pin this before pointing anyone external at the lab.
-    # `latest-product-catalog` is reassigned by every build, so with
-    # pullPolicy: Always the application can change between two runs of the same
-    # scenario, and one bad push breaks every install at once. Once a release is
-    # cut (Actions -> "Release images", e.g. version `3.0.0-nudgebee.1`) replace
-    # these three lines with:
-    #   tag: 3.0.0-nudgebee.1-product-catalog
-    #   pullPolicy: IfNotPresent
-    # and update --code-commit in annotate-workloads.sh to the commit that built
-    # it, or the code agent will cite source that is not what is running.
     imageOverride:
       repository: ghcr.io/nudgebee/opentelemetry-demo
       tag: latest-product-catalog
@@ -198,8 +285,6 @@ components:
   # because /healthz and the second listener were added in this fork; upstream
   # `ghcr.io/open-telemetry/demo` has neither and the probe would never succeed.
   cart:
-    # ROLLING TAG -- see the note on product-catalog above. Pin to
-    # `<version>-cart` with pullPolicy: IfNotPresent once a release is cut.
     imageOverride:
       repository: ghcr.io/nudgebee/opentelemetry-demo
       tag: latest-cart
