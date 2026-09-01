@@ -7,6 +7,9 @@ the release.
 
 ## Unreleased
 
+* [flagd-ui] fix fsnotify REMOVE event by modifying flagd config in place
+  ([#510](https://github.com/open-telemetry/opentelemetry-demo/pull/510))
+
 * [recommendation] Fix `recommendationCacheFailure` feature flag by
   using `ListProducts` instead of `GetProduct`
   ([#3260](https://github.com/open-telemetry/opentelemetry-demo/pull/3260))

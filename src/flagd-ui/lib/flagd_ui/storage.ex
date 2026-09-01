@@ -64,7 +64,11 @@ defmodule FlagdUi.Storage do
   end
 
   defp write_state(json_string) do
-    File.write!(@file_path, json_string)
+    File.open!(@file_path, [:read, :write, :binary], fn fd ->
+      {:ok, _} = :file.position(fd, :bof)
+      :ok = :file.write(fd, json_string)
+      :ok = :file.truncate(fd)
+    end)
 
     Logger.info("Wrote new state to file")
   end
