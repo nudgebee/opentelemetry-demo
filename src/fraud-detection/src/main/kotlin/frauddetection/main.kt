@@ -32,7 +32,6 @@ fun main() {
     val options = FlagdOptions.builder()
     .withGlobalTelemetry(true)
     .streamDeadlineMs(0)
-    .deadline(3000)
     .build()
     val flagdProvider = FlagdProvider(options)
     OpenFeatureAPI.getInstance().setProvider(flagdProvider)
