@@ -13,15 +13,11 @@ permissions:
 jobs:
   build_and_push_images:
     permissions:  # required by the reusable workflow
-      contents: read  # required by the component-build-images reusable workflow
-      packages: write  # required to push built images to GHCR
+      contents: read
+      packages: write
     uses: ./.github/workflows/component-build-images.yml
     with:
       push: true
-      force_build: true
       version: nightly
       ghcr_repo: ghcr.io/nudgebee/opentelemetry-demo
-    # `inherit` rather than upstream's explicit DOCKER_USERNAME/DOCKER_PASSWORD
-    # pair: this repo publishes to GHCR only and has no Docker Hub credentials,
-    # so naming those secrets would pass empty strings to the reusable workflow.
     secrets: inherit
