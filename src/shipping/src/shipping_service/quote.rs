@@ -3,9 +3,7 @@
 
 use core::fmt;
 use opentelemetry::global;
-use opentelemetry::metrics::Counter;
 use opentelemetry_instrumentation_actix_web::ClientExt;
-use std::sync::LazyLock;
 use std::{collections::HashMap, env};
 
 use anyhow::{Context, Result};
@@ -13,12 +11,6 @@ use opentelemetry::{trace::get_active_span, KeyValue};
 use tracing::info;
 
 use super::shipping_types::Quote;
-
-static ITEMS_SHIPPED_COUNTER: LazyLock<Counter<u64>> = LazyLock::new(|| {
-    global::meter("otel_demo.shipping.quote")
-        .u64_counter("demo.shipping.items_shipped")
-        .build()
-});
 
 pub async fn create_quote_from_count(count: u32) -> Result<Quote, tonic::Status> {
     let f = match request_quote(count).await {
@@ -29,18 +21,17 @@ pub async fn create_quote_from_count(count: u32) -> Result<Quote, tonic::Status>
         }
     };
 
-    ITEMS_SHIPPED_COUNTER.add(count as u64, &[]);
+    let meter = global::meter("otel_demo.shipping.quote");
+    let counter = meter.u64_counter("app.shipping.items_count").build();
+    counter.add(count as u64, &[]);
 
     Ok(get_active_span(|span| {
         let q = create_quote_from_float(f);
-        if span.is_recording() {
-            let cost = format!("{}", q);
-            span.add_event(
-                "shipping.quote.received".to_string(),
-                vec![KeyValue::new("demo.shipping.cost.total", cost.clone())],
-            );
-            span.set_attribute(KeyValue::new("demo.shipping.cost.total", cost));
-        }
+        span.add_event(
+            "Received Quote".to_string(),
+            vec![KeyValue::new("app.shipping.cost.total", format!("{}", q))],
+        );
+        span.set_attribute(KeyValue::new("app.shipping.cost.total", format!("{}", q)));
         q
     }))
 }
@@ -57,9 +48,9 @@ async fn request_quote(count: u32) -> Result<f64, anyhow::Error> {
     );
 
     info!(
-        name: "shipping.quote.requested",
+        name = "RequestingQuote",
         quote_service_addr = quote_service_addr.as_str(),
-        "Requesting quote"
+        message = "Requesting quote"
     );
 
     let mut reqbody = HashMap::new();

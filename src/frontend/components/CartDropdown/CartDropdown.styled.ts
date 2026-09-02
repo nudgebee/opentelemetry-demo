@@ -69,11 +69,10 @@ export const ItemName = styled.p`
   font-weight: ${({ theme }) => theme.fonts.regular};
 `;
 
-export const ItemDetails = styled.div<{ $fullWidth?: boolean }>`
+export const ItemDetails = styled.div`
   display: flex;
   flex-direction: column;
   gap: 5px;
-  ${({ $fullWidth }) => $fullWidth && 'grid-column: 1 / -1;'}
 `;
 
 export const ItemQuantity = styled(ItemName)`
