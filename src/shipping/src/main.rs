@@ -1,12 +1,9 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-use actix_web::{web, App, HttpResponse, HttpServer};
-use open_feature::provider::FeatureProvider;
-use open_feature_flagd::{FlagdOptions, FlagdProvider};
+use actix_web::{App, HttpServer};
 use opentelemetry_instrumentation_actix_web::{RequestMetrics, RequestTracing};
 use std::env;
-use std::sync::Arc;
 use tracing::info;
 
 mod telemetry_conf;
@@ -16,10 +13,9 @@ use shipping_service::{get_quote, ship_order};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let otel_guard = match init_otel() {
-        Ok(guard) => {
+    match init_otel() {
+        Ok(_) => {
             info!("Successfully configured OTel");
-            guard
         }
         Err(err) => {
             panic!("Couldn't start OTel: {0}", err);
@@ -42,36 +38,19 @@ async fn main() -> std::io::Result<()> {
 
     let addr = format!("{}:{}", ip, port);
     info!(
-        name: "shipping.server.started",
+        name = "ServerStartedSuccessfully",
         addr = addr.as_str(),
         message = "Shipping service is running"
     );
 
-    let provider = FlagdProvider::new(FlagdOptions {
-        cache_settings: None,
-        ..Default::default()
-    })
-    .await
-    .expect("Failed to initialize flagd provider");
-
-    let flag_provider = web::Data::from(Arc::new(provider) as Arc<dyn FeatureProvider>);
-
-    HttpServer::new(move || {
+    HttpServer::new(|| {
         App::new()
-            .app_data(flag_provider.clone())
             .wrap(RequestTracing::new())
             .wrap(RequestMetrics::default())
             .service(get_quote)
             .service(ship_order)
-            .route(
-                "/health",
-                web::get().to(|| async { HttpResponse::Ok().finish() }),
-            )
     })
     .bind(&addr)?
     .run()
-    .await?;
-
-    otel_guard.shutdown();
-    Ok(())
+    .await
 }

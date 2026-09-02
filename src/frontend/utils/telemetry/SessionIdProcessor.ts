@@ -16,7 +16,6 @@ export class SessionIdProcessor implements SpanProcessor {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     onStart(span: Span, parentContext: Context): void {
         span.setAttribute(AttributeNames.SESSION_ID, userId);
-        span.setAttribute(AttributeNames.ENDUSER_ID, userId);
     }
 
     // eslint-disable-next-line @typescript-eslint/no-unused-vars, @typescript-eslint/no-empty-function
