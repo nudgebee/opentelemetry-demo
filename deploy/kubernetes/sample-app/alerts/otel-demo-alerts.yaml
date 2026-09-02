@@ -93,13 +93,14 @@ spec:
           Error Rate: {{ $value | humanizePercentage }}
         summary: High gRPC client error rate from {{ $labels.service_name }} calling {{ $labels.rpc_service }}/{{ $labels.rpc_method }}
       expr: |-
+        # Exclude long-lived gRPC streams (like EventStream) that naturally time out and lack success metrics, causing false positive 100% error rates.
         (
           sum by (service_name, k8s_deployment_name, pod, namespace, rpc_service, rpc_method) (
-            rate(rpc_client_duration_count{namespace="demo", rpc_grpc_status_code!="0"}[2m])
+            rate(rpc_client_duration_count{namespace="demo", rpc_grpc_status_code!="0", rpc_method!="EventStream"}[2m])
           )
           /
           sum by (service_name, k8s_deployment_name, pod, namespace, rpc_service, rpc_method) (
-            rate(rpc_client_duration_count{namespace="demo"}[2m])
+            rate(rpc_client_duration_count{namespace="demo", rpc_method!="EventStream"}[2m])
           )
         ) > 0.05
       for: 1m
