@@ -670,7 +670,10 @@ func (cs *checkout) sendToPostProcessor(ctx context.Context, result *pb.OrderRes
 		logger.Info("Warning: FeatureFlag 'kafkaQueueProblems' is activated, overloading queue now.")
 		for i := 0; i < ffValue; i++ {
 			go func(i int) {
-				msgCopy := msg
+				msgCopy := sarama.ProducerMessage{
+					Topic: kafka.Topic,
+					Value: sarama.ByteEncoder(message),
+				}
 				select {
 				case cs.KafkaProducerClient.Input() <- &msgCopy:
 				case <-ctx.Done():
