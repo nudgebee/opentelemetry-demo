@@ -13,6 +13,7 @@ namespace cart.services;
 public class CartService : Oteldemo.CartService.CartServiceBase
 {
     private static readonly Empty Empty = new();
+    private readonly Random random = new Random();
     private readonly ICartStore _badCartStore;
     private readonly ICartStore _cartStore;
     private readonly IFeatureClient _featureFlagHelper;
@@ -27,9 +28,9 @@ public class CartService : Oteldemo.CartService.CartServiceBase
     public override async Task<Empty> AddItem(AddItemRequest request, ServerCallContext context)
     {
         var activity = Activity.Current;
-        activity?.SetTag("user.id", request.UserId);
-        activity?.SetTag("demo.product.id", request.Item.ProductId);
-        activity?.SetTag("demo.product.quantity", request.Item.Quantity);
+        activity?.SetTag("app.user.id", request.UserId);
+        activity?.SetTag("app.product.id", request.Item.ProductId);
+        activity?.SetTag("app.product.quantity", request.Item.Quantity);
 
         try
         {
@@ -48,7 +49,7 @@ public class CartService : Oteldemo.CartService.CartServiceBase
     public override async Task<Cart> GetCart(GetCartRequest request, ServerCallContext context)
     {
         var activity = Activity.Current;
-        activity?.SetTag("user.id", request.UserId);
+        activity?.SetTag("app.user.id", request.UserId);
         activity?.AddEvent(new("Fetch cart"));
 
         try
@@ -59,7 +60,7 @@ public class CartService : Oteldemo.CartService.CartServiceBase
             {
                 totalCart += item.Quantity;
             }
-            activity?.SetTag("demo.cart.items.count", totalCart);
+            activity?.SetTag("app.cart.items.count", totalCart);
 
             return cart;
         }
@@ -74,13 +75,12 @@ public class CartService : Oteldemo.CartService.CartServiceBase
     public override async Task<Empty> EmptyCart(EmptyCartRequest request, ServerCallContext context)
     {
         var activity = Activity.Current;
-        activity?.SetTag("user.id", request.UserId);
+        activity?.SetTag("app.user.id", request.UserId);
         activity?.AddEvent(new("Empty cart"));
 
         try
         {
-            var cartFailureRate = await _featureFlagHelper.GetDoubleValueAsync("cartFailure", 0);
-            if (cartFailureRate > 0 && Random.Shared.NextDouble() < cartFailureRate)
+            if (await _featureFlagHelper.GetBooleanValueAsync("cartFailure", false))
             {
                 await _badCartStore.EmptyCartAsync(request.UserId);
             }
