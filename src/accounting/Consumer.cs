@@ -2,9 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using Confluent.Kafka;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Npgsql;
 using Oteldemo;
 using Microsoft.EntityFrameworkCore;
 using System.Diagnostics;
@@ -26,12 +24,13 @@ internal class DBContext : DbContext
 }
 
 
-internal class Consumer : BackgroundService
+internal class Consumer : IDisposable
 {
-    private static readonly string TopicName = Environment.GetEnvironmentVariable("KAFKA_TOPIC") ?? "orders";
+    private const string TopicName = "orders";
 
-    private readonly ILogger _logger;
-    private readonly IConsumer<string, byte[]> _consumer;
+    private ILogger _logger;
+    private IConsumer<string, byte[]> _consumer;
+    private bool _isListening;
     private readonly string? _dbConnectionString;
     private static readonly ActivitySource MyActivitySource = new("Accounting.Consumer");
 
@@ -45,37 +44,41 @@ internal class Consumer : BackgroundService
         _consumer = BuildConsumer(servers);
         _consumer.Subscribe(TopicName);
 
-        Log.KafkaConnecting(_logger, servers);
+       if (_logger.IsEnabled(LogLevel.Information))
+       {
+           _logger.LogInformation("Connecting to Kafka: {servers}", servers);
+       }
 
         _dbConnectionString = Environment.GetEnvironmentVariable("DB_CONNECTION_STRING");
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    public void StartListening()
     {
-        await Task.Yield();
+        _isListening = true;
 
         try
         {
-            while (!stoppingToken.IsCancellationRequested)
+            while (_isListening)
             {
                 try
                 {
                     using var activity = MyActivitySource.StartActivity("order-consumed",  ActivityKind.Internal);
-                    var consumeResult = _consumer.Consume(stoppingToken);
+                    var consumeResult = _consumer.Consume();
                     ProcessMessage(consumeResult.Message);
                 }
                 catch (ConsumeException e)
                 {
-                    Log.ConsumeError(_logger, e, e.Error.Reason);
+                    if (_logger.IsEnabled(LogLevel.Error))
+                    {
+                        _logger.LogError(e, "Consume error: {reason}", e.Error.Reason);
+                    }
                 }
             }
         }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
-        }
-        finally
-        {
-            Log.ConsumerClosing(_logger);
+            _logger.LogInformation("Closing consumer");
+
             _consumer.Close();
         }
     }
@@ -129,13 +132,9 @@ internal class Consumer : BackgroundService
             dbContext.Add(shipping);
             dbContext.SaveChanges();
         }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
-        {
-            Log.DuplicateOrderSkipped(_logger);
-        }
         catch (Exception ex)
         {
-            Log.OrderParsingFailed(_logger, ex);
+            _logger.LogError(ex, "Order parsing failed:");
         }
     }
 
@@ -143,7 +142,7 @@ internal class Consumer : BackgroundService
     {
         var conf = new ConsumerConfig
         {
-            GroupId = "accounting",
+            GroupId = $"accounting",
             BootstrapServers = servers,
             // https://github.com/confluentinc/confluent-kafka-dotnet/tree/07de95ed647af80a0db39ce6a8891a630423b952#basic-consumer-example
             AutoOffsetReset = AutoOffsetReset.Earliest,
@@ -154,9 +153,9 @@ internal class Consumer : BackgroundService
             .Build();
     }
 
-    public override void Dispose()
+    public void Dispose()
     {
+        _isListening = false;
         _consumer?.Dispose();
-        base.Dispose();
     }
 }

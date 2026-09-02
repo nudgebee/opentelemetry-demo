@@ -13,9 +13,11 @@ permissions:
 
 jobs:
   build_images:
-    name: Build images
     permissions:
-      contents: read  # required by the component-build-images reusable workflow
-      packages: write  # required to push built images to GHCR
-    if: ${{ !github.event.repository.fork }}
+      contents: read
+      packages: write
     uses: ./.github/workflows/component-build-images.yml
+    with:
+      push: ${{ github.ref == 'refs/heads/main' }}
+      version: latest
+      ghcr_repo: ghcr.io/nudgebee/opentelemetry-demo
