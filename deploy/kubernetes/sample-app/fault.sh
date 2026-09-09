@@ -183,13 +183,40 @@ case "${1:-}" in
     exit 0 ;;
 
   status)
-    echo "Active scenario objects in namespace '$NS':"
-    OUT="$(kubectl -n "$NS" get networkchaos,job -l "$LABEL" 2>/dev/null || true)"
-    if [ -z "$OUT" ]; then
-      echo "  (none)"
-    else
-      printf '%s\n' "$OUT" | sed 's/^/  /'
-    fi
+    # Report whether each scenario is actually INJECTING, not merely whether an
+    # object exists. A Chaos Mesh CR is NOT deleted when spec.duration expires --
+    # it recovers the fault and stays behind with AllRecovered=true. Listing
+    # objects alone therefore reports an expired scenario as if it were still
+    # running, which is exactly the wrong way for this to be wrong.
+    echo "Scenarios in namespace '$NS':"
+    FOUND=0
+    while read -r name recovered; do
+      [ -n "$name" ] || continue
+      FOUND=1
+      if [ "$recovered" = "True" ]; then
+        printf '  %-8s recovered (expired; object left behind, safe to delete)\n' "$name"
+      else
+        printf '  %-8s INJECTING\n' "$name"
+      fi
+    done <<EOF
+$(kubectl -n "$NS" get networkchaos -l "$LABEL" \
+    -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.conditions[?(@.type=="AllRecovered")].status}{"\n"}{end}' 2>/dev/null || true)
+EOF
+    while read -r name active; do
+      [ -n "$name" ] || continue
+      FOUND=1
+      if [ "${active:-0}" = "1" ]; then
+        printf '  %-8s RUNNING\n' "$name"
+      else
+        printf '  %-8s finished (object left behind, safe to delete)\n' "$name"
+      fi
+    done <<EOF
+$(kubectl -n "$NS" get job -l "$LABEL" \
+    -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.active}{"\n"}{end}' 2>/dev/null || true)
+EOF
+    [ "$FOUND" = 1 ] || echo "  (none)"
+    echo
+    echo "Clear finished objects with: $0 stop --all"
     exit 0 ;;
 
   *) die "unknown command '${1}' (try: $0 --help)" ;;
