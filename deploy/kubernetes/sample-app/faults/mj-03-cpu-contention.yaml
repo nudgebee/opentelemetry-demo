@@ -1,0 +1,96 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# id:       mj-03
+# category: infra
+# summary:  A batch workload lands on checkout's node and burns every core.
+#
+# Mechanism: a genuine CPU-hungry co-tenant, pinned by pod affinity onto the node
+# already running checkout. Nothing is done to checkout at all -- it is starved
+# because it now shares cores with a neighbour that wants all of them.
+#
+# Expected symptoms:
+#   - node CPU saturates on the node running checkout
+#   - checkout's own CPU is forced BELOW its normal level (starved, not busy) and
+#     its latency rises
+#   - checkout's dependencies stay healthy; the cause is node-local contention
+#
+# This is the cause-vs-consequence test: the victim and the culprit are different
+# workloads that share only a node, so anything reasoning purely along the call
+# graph will not find it -- the link is topological, not a dependency.
+#
+# ---------------------------------------------------------------------------
+# PREREQUISITE: RAISE THE LOAD FIRST, OR THIS PRODUCES NOTHING
+# ---------------------------------------------------------------------------
+# Measured on dev 2026-09-08 at the default 5 VUs: this saturated the node
+# correctly (3.75 of 3.92 allocatable cores, 3.0 of them this Job) and checkout
+# was STILL COMPLETELY UNAFFECTED -- 23.2ms -> 25.9ms mean, no throttling, CPU
+# flat at ~2 millicores.
+#
+# The reason is structural, not a tuning problem. Saturating a node only starves
+# a workload that actually wants CPU, and at 5 VUs every demo service is idle
+# enough to be served out of the slack no matter how contended the node is.
+# rca-lab's victim is a Java service under real load; ours is not.
+#
+# So run this WITH traffic, not on an idle demo:
+#   ./scenario.sh loadGeneratorVUs 50     # or start mj-04 first
+#   ./fault.sh start mj-03
+#
+# Verify the prerequisite is met before believing a negative result: checkout
+# should be drawing tens of millicores, not two, before this Job starts.
+#
+# Self-expiring: activeDeadlineSeconds terminates the Job even if nothing deletes
+# it, so a dead terminal cannot leave a node saturated.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mj-03
+  namespace: __NAMESPACE__
+  labels:
+    maintenance.platform/job: mj-03
+spec:
+  activeDeadlineSeconds: 600
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        maintenance.platform/job: mj-03
+        app.kubernetes.io/name: media-transcoder
+    spec:
+      restartPolicy: Never
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: checkout
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: media-transcoder
+          image: busybox:1.36
+          # One spinner per core: saturate the node rather than one core, which is
+          # what makes the neighbour's CFS share actually shrink.
+          command:
+            - sh
+            - -c
+            - |
+              n=$(nproc)
+              echo "starting $n workers"
+              i=0
+              while [ "$i" -lt "$n" ]; do
+                ( while :; do :; done ) &
+                i=$((i+1))
+              done
+              wait
+          # Requests are deliberately tiny. They are a scheduling and CFS-share
+          # input, not a cap on what this burns -- it takes whatever is idle. A
+          # large request just makes the pod unschedulable on the very node we
+          # need it on (measured: 500m would not fit beside checkout on dev).
+          # It also matches the real incident: the batch job that ruins a node is
+          # always the one that asked for almost nothing.
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi

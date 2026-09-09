@@ -1,0 +1,90 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# id:       mj-04
+# category: infra
+# summary:  A second load generator drives real extra traffic through the demo.
+#
+# Mechanism: actually more traffic. It runs the demo's own k6 load generator
+# image against the same entry point, rather than raising loadGeneratorVUs --
+# the flag path reconfigures the existing generator, which makes the change look
+# like a config event in the telemetry and gives the answer away. A separate
+# workload arriving looks like what it is: demand went up.
+#
+# Expected symptoms:
+#   - RPS rises roughly uniformly across every service behind frontend-proxy
+#   - saturation (latency, errors) appears ONLY at the weakest component, not
+#     everywhere traffic increased
+#
+# The test is cause versus consequence: the component that breaks is not the
+# component that changed, and the honest answer is "demand rose and X is the
+# bottleneck", not "X regressed".
+#
+# Self-expiring: activeDeadlineSeconds stops the surge even if nothing deletes it.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mj-04
+  namespace: __NAMESPACE__
+  labels:
+    maintenance.platform/job: mj-04
+spec:
+  activeDeadlineSeconds: 900
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        maintenance.platform/job: mj-04
+        app.kubernetes.io/name: load-driver
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: load-driver
+          image: ghcr.io/open-telemetry/demo:3.0.0-load-generator
+          workingDir: /home/k6
+          # Bypass the image's entrypoint.sh on purpose. That wrapper reads the VU
+          # count from the loadGeneratorVUs FLAGD FLAG and only falls back to
+          # LOAD_GENERATOR_VUS when flagd is unreachable -- so setting the env var
+          # alone silently does nothing and you get the flag's value instead
+          # (measured: asked for 40, got 5). It also adds `--out opentelemetry`,
+          # which then spams connection-refused because this pod has no collector
+          # endpoint configured. Calling k6 directly fixes both, and keeps this
+          # generator independent of demo flag state, which is what we want: the
+          # surge should not be a config change anyone can see.
+          command: ["k6", "run", "script.js"]
+          env:
+            - name: K6_TARGET_URL
+              value: http://frontend-proxy:8080
+            - name: LOAD_GENERATOR_VUS
+              value: "40"
+            # The browser driver needs a sandbox and a lot of memory, and adds
+            # nothing here -- we want request volume, not rendering.
+            - name: K6_BROWSER_ENABLED
+              value: "false"
+            # Point telemetry at the demo's own collector, resolved from the stock
+            # load-generator at start time so this file stays portable.
+            #
+            # OTEL_SDK_DISABLED=true does NOT silence this image -- the k6 OTel
+            # extension ignores it and keeps posting to the localhost default,
+            # which produced 36 connection-refused lines every 30s (measured). Log
+            # spam starting at exactly incident onset gives the scenario away just
+            # as badly as a descriptive name would, and it pollutes the log store
+            # the tool under test is reading.
+            #
+            # Reporting as `load-generator` rather than a new service name is
+            # deliberate and not a disguise: this IS load-generator traffic, and a
+            # brand-new service appearing at onset would itself be the answer.
+            # What should be visible is that demand rose, not that someone ran a
+            # tool.
+            - name: OTEL_SERVICE_NAME
+              value: load-generator
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: __OTEL_ENDPOINT__
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: http/protobuf
+          resources:
+            requests:
+              cpu: "200m"
+              memory: 256Mi
+            limits:
+              memory: 1Gi

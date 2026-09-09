@@ -1,0 +1,59 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# id:       mj-01
+# category: network
+# summary:  ~200ms of latency added to packets arriving at product-catalog.
+#
+# Mechanism: a real network condition (Chaos Mesh netem/tc on the pod's
+# interface), not a flag telling the service to sleep. product-catalog's own
+# processing time, CPU and database time are untouched -- the time is spent on
+# the wire. That distinction is the whole point: it is the case where every
+# component looks healthy in isolation and only the path between them is slow.
+#
+# Expected symptoms:
+#   - product-catalog p99 rises ~200ms while its CPU and DB time stay flat
+#   - frontend / checkout latency on catalog-backed routes rises by the same amount
+#   - error rate unchanged; the gap is on the network path, not server-side
+#
+# Reverts itself after spec.duration even if nothing deletes it.
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: mj-01
+  namespace: __NAMESPACE__
+  labels:
+    maintenance.platform/job: mj-01
+spec:
+  action: delay
+  mode: all
+  duration: 10m
+  direction: to
+  selector:
+    namespaces:
+      - __NAMESPACE__
+    labelSelectors:
+      app.kubernetes.io/name: product-catalog
+  # Scoping to the CALLERS is what makes this scenario mean what it claims.
+  # Without a target, netem lands on product-catalog's whole interface, so its
+  # egress to astronomy-db is delayed too -- measured 2026-09-08 on dev, DB client
+  # time went 0.22ms -> 70ms. An analyst then sees database time up and blames the
+  # database, and the scenario no longer isolates a network path at all. With the
+  # target set, only product-catalog<->caller traffic is delayed and DB time stays
+  # flat, which is the signal the scenario exists to produce.
+  target:
+    mode: all
+    selector:
+      namespaces:
+        - __NAMESPACE__
+      expressionSelectors:
+        - key: app.kubernetes.io/name
+          operator: In
+          values:
+            - frontend
+            - checkout
+            - recommendation
+  delay:
+    latency: 200ms
+    jitter: 50ms
+    correlation: "50"
