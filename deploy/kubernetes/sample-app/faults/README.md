@@ -98,9 +98,28 @@ distinguishing signal is present:
 | id | symptom (expected everywhere) | tell (what makes it this scenario) |
 |----|-------------------------------|------------------------------------|
 | mj-01 | caller latency up ~200ms | product-catalog CPU **and DB time** flat |
-| mj-02 | intermittent spikes on many services | every dependency healthy; CoreDNS CPU flat |
+| mj-02 | spikes on many services at once | every dependency healthy; services that do not resolve names are unaffected |
 | mj-03 | checkout latency up | checkout CPU *below* normal — starved, not busy |
 | mj-04 | latency/errors at one component | RPS up **everywhere**; only the weakest saturates |
 
-Measured on dev 2026-09-08 for mj-01: frontend mean 4.5ms → 227.8ms, checkout
-gRPC client 1.1ms → 99.6ms, product-catalog CPU 0.0066 → 0.0066 cores.
+**Measure while the scenario is running.** A Chaos Mesh CR recovers the fault
+when `spec.duration` expires but leaves the object behind, so a reading taken
+afterwards is flat and the scenario looks like it did nothing. `fault.sh status`
+says `INJECTING` vs `recovered`.
+
+Measured on dev:
+
+| id | result |
+|----|--------|
+| mj-01 | frontend mean 4.5ms → 163.7ms; CPU 0.0062 → 0.0063 cores, DB 0.27ms → 0.25ms — both flat |
+| mj-02 | frontend p95 22.7ms → 646.3ms; checkout 21.2ms → 1150.6ms; jaeger unaffected |
+| mj-03 | **no signal** at default load — see the note in its file; needs traffic first |
+| mj-04 | product-catalog 1.76 → 11.5 rps, checkout 0.08 → 0.59 rps |
+
+## These faults are invisible without the degraded-latency rule
+
+`OtelDemoHighLatency` fires at p95 > 5s. Every scenario here is sub-second, so
+before `alerts/otel-demo-degraded-alerts.yaml` existed, mj-01 ran for eleven
+minutes at a 894.6ms storefront p95 and raised **no event at all**. Apply that
+rule alongside the rest of the pack or the network scenarios will look like the
+monitoring missed them — which is a different, and wrong, conclusion.
