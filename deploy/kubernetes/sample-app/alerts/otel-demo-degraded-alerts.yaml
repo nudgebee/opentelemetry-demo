@@ -27,6 +27,14 @@
 # This complements rather than replaces the 5s rule: the two tiers say different
 # things, and an incident that trips both is worth ranking above one that trips
 # only this.
+#
+# NOTE ON NAMESPACES -- there are two, and they are not the same thing.
+# `metadata.namespace` is where the PrometheusRule object lives (wherever your
+# Prometheus operator watches for rules). The `namespace="demo"` selector inside
+# each PromQL expression is the namespace the DEMO runs in. If you install the
+# demo somewhere other than `demo`, every selector below must be updated or the
+# rules will load, evaluate cleanly, and never fire -- there is no error for
+# a label selector that matches nothing.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:

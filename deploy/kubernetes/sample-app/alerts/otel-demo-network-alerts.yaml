@@ -1,6 +1,14 @@
 # Copyright The OpenTelemetry Authors
 # SPDX-License-Identifier: Apache-2.0
 #
+# NOTE ON NAMESPACES -- there are two, and they are not the same thing.
+# `metadata.namespace` is where the PrometheusRule object lives (wherever your
+# Prometheus operator watches for rules). The `namespace="demo"` selector inside
+# each PromQL expression is the namespace the DEMO runs in. If you install the
+# demo somewhere other than `demo`, every selector below must be updated or the
+# rules will load, evaluate cleanly, and never fire -- there is no error for
+# a label selector that matches nothing.
+#
 # These three rules close the NetOps and DBOps gaps in the existing demo alert pack.
 # Before them the pack could only ever produce AppOps alerts (gRPC/HTTP error rates) plus
 # whatever the Kubernetes event path raised, so a database-rooted incident showed up as
@@ -90,7 +98,8 @@ spec:
         - alert: OtelDemoDatabaseOperationsStopped
           expr: |
             sum by (namespace, k8s_deployment_name, service_name, server_address, db_system_name) (
-              rate(db_client_operation_duration_seconds_count{namespace="demo", db_operation_name="sql.conn.query"}[2m])
+              rate({__name__=~"db_client_operation_duration_(seconds_)?count",
+                    namespace="demo", db_operation_name="sql.conn.query"}[2m])
             ) == 0
           for: 1m
           labels:

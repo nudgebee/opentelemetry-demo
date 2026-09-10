@@ -88,7 +88,9 @@ command -v kubectl >/dev/null || die "kubectl not found"
 
 file_for() {
   local id="$1" f
-  f="$(find "$DIR" -maxdepth 1 -name "${id}-*.yaml" -o -maxdepth 1 -name "${id}.yaml" 2>/dev/null | head -1)"
+  # Group the -name tests: GNU find warns when a global option like -maxdepth
+  # appears after -o, and the warning goes to stderr on every single lookup.
+  f="$(find "$DIR" -maxdepth 1 \( -name "${id}-*.yaml" -o -name "${id}.yaml" \) 2>/dev/null | head -1)"
   [ -n "$f" ] || die "unknown scenario '$id' (try: $0 list)"
   echo "$f"
 }
@@ -173,7 +175,17 @@ case "${1:-}" in
     if [ "$TARGET" = "--all" ]; then
       # Delete by label rather than by file, so objects from a scenario file that
       # has since been edited or deleted still get cleaned up.
-      kubectl -n "$NS" delete networkchaos,job -l "$LABEL" --ignore-not-found
+      #
+      # networkchaos is deleted separately and only when the CRD exists. Naming an
+      # unknown resource type is a hard error, not a no-op that --ignore-not-found
+      # absorbs, so on a cluster without Chaos Mesh a combined
+      # `delete networkchaos,job` aborts under `set -e` and the Jobs -- the ones
+      # actually burning CPU -- never get cleaned up. The failure mode is a
+      # cleanup command that looks like it ran and did nothing.
+      if kubectl get crd networkchaos.chaos-mesh.org >/dev/null 2>&1; then
+        kubectl -n "$NS" delete networkchaos -l "$LABEL" --ignore-not-found
+      fi
+      kubectl -n "$NS" delete job -l "$LABEL" --ignore-not-found
       echo "Reverted everything labelled $LABEL in namespace '$NS'."
     else
       F="$(file_for "$TARGET")"
