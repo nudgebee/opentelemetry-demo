@@ -132,6 +132,60 @@ spec:
               Datastore: {{ $labels.destination_workload_namespace }}/{{ $labels.destination_workload_name }}
               p95: {{ $value | printf "%.3f" }}s
 
+        # DBOps, the failing-but-reachable case. The other three datastore rules each
+        # need a different thing to be true, and none of them covers a database that
+        # is up, accepting connections, and returning errors:
+        #
+        #   OtelDemoDatabaseUnavailable        needs zero replicas
+        #   OtelDemoDatabaseOperationsStopped  needs the client to give up entirely
+        #   OtelDemoDatastoreQueryLatencyHigh  needs queries to be slow, not failing
+        #
+        # That gap is not hypothetical -- permission denied after a credential
+        # rotation, a bad schema migration, constraint violations after a bad
+        # release. The database is healthy by every infrastructure measure and every
+        # query is rejected. The SDK metric cannot see it either: measured
+        # 2026-09-10, db_client_operation_duration carries no error or status label
+        # on this stack at all.
+        #
+        # `status` here means the server ANSWERED with an error, which is different
+        # from being unable to reach it -- a refused connection produces no protocol
+        # exchange and shows up at L4 in OtelDemoServiceConnectFailures instead.
+        # Verified during a real astronomy-db outage: at L7 both ok and failed were
+        # 0/s while failed TCP connects ran at 0.319/s. The layers are not
+        # redundant, they see different failures.
+        #
+        # 1% matches the pack's HTTP and gRPC error-rate rules. Real datastores here
+        # idle at 0.01-0.03% failed, so this sits about 30x above background.
+        - alert: OtelDemoDatastoreQueryErrors
+          expr: |
+            label_replace(
+              label_replace(
+                (
+                  sum by (destination_workload_namespace, destination_workload_name) (
+                    rate({__name__=~"container_(postgres|redis)_queries_total",
+                          destination_workload_namespace="demo", status="failed"}[5m])
+                  )
+                  /
+                  sum by (destination_workload_namespace, destination_workload_name) (
+                    rate({__name__=~"container_(postgres|redis)_queries_total",
+                          destination_workload_namespace="demo"}[5m])
+                  )
+                ) > 0.01,
+                "namespace", "$1", "destination_workload_namespace", "(.+)"),
+              "k8s_deployment_name", "$1", "destination_workload_name", "(.+)")
+          for: 2m
+          labels:
+            severity: critical
+            ops_domain: dbops
+          annotations:
+            summary: "Queries against {{ $labels.destination_workload_name }} are failing in demo namespace"
+            description: |
+              The datastore is reachable and answering, but rejecting queries. This
+              is not a connectivity or capacity problem -- look for credentials, a
+              recent migration, or a schema change rather than for load.
+              Datastore: {{ $labels.destination_workload_namespace }}/{{ $labels.destination_workload_name }}
+              Failed: {{ $value | humanizePercentage }}
+
         # DBOps, client side. Complements the rule above by naming the dependent service
         # rather than the datastore. Bounded by Prometheus staleness -- the series
         # disappears ~5m after the last sample -- so it only fires in the window right
