@@ -17,10 +17,8 @@ apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: otel-demo-network-alerts
-  namespace: nudgebee-agent
   labels:
     app: otel-demo
-    release: nudgebee-prometheus   # matches the Prometheus CR's ruleSelector
 spec:
   groups:
     - name: otel-demo-network
@@ -88,6 +86,51 @@ spec:
               Every replica of this datastore is down, so no client can obtain a
               connection. Dependent services will fail outright rather than slow down.
               Datastore: {{ $labels.namespace }}/{{ $labels.deployment }}
+
+        # DBOps, measured on the wire. The node agent's eBPF L7 parser times every
+        # query between a client and a datastore, so unlike the SDK metrics this
+        # needs no application instrumentation and cannot be fooled by an app that
+        # stops reporting.
+        #
+        # That independence is the point. The two rules below it answer "is the
+        # datastore up" and "has this client given up". Neither answers "are queries
+        # slow", which is the shape of the incidents that are hardest to diagnose:
+        # a stalled lock or a saturating analytics workload leaves the database
+        # running, answering, and idle on CPU while every query behind it blocks.
+        # Paired with container CPU, this rule gives the distinguishing read:
+        # queries slow AND datastore CPU flat means contention, not saturation.
+        #
+        # One rule covers postgres and redis via __name__; the agent exports a
+        # separate metric family per protocol and they are otherwise identical.
+        # Attribution is the DESTINATION for the same reason as the NetOps rule
+        # above -- the datastore is the subject, not whoever happened to query it.
+        #
+        # Idle p95 for astronomy-db is ~4.75ms, so 250ms is ~50x headroom.
+        - alert: OtelDemoDatastoreQueryLatencyHigh
+          expr: |
+            label_replace(
+              label_replace(
+                histogram_quantile(0.95,
+                  sum by (destination_workload_namespace, destination_workload_name, le) (
+                    rate({__name__=~"container_(postgres|redis)_queries_duration_seconds_total_bucket",
+                          destination_workload_namespace="demo"}[5m])
+                  )
+                ) > 0.25,
+                "namespace", "$1", "destination_workload_namespace", "(.+)"),
+              "k8s_deployment_name", "$1", "destination_workload_name", "(.+)")
+          for: 2m
+          labels:
+            severity: warning
+            ops_domain: dbops
+          annotations:
+            summary: "Slow queries against {{ $labels.destination_workload_name }} in demo namespace"
+            description: |
+              Query time measured on the wire is well above normal for this
+              datastore. Check its CPU before concluding it is overloaded -- flat
+              CPU with slow queries means contention (a lock, a stalled
+              transaction), not saturation.
+              Datastore: {{ $labels.destination_workload_namespace }}/{{ $labels.destination_workload_name }}
+              p95: {{ $value | printf "%.3f" }}s
 
         # DBOps, client side. Complements the rule above by naming the dependent service
         # rather than the datastore. Bounded by Prometheus staleness -- the series
