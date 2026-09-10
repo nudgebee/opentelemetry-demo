@@ -13,7 +13,7 @@ Mechanisms are adapted from [coroot/rca-lab](https://github.com/coroot/rca-lab)
 (Apache-2.0), which is a full separate lab stack. We port the mechanisms onto
 the demo we already run rather than installing it.
 
-```
+```bash
 ./fault.sh list
 ./fault.sh describe mj-01
 ./fault.sh start mj-01
@@ -28,10 +28,10 @@ the script dying, the terminal closing, or a laptop going to sleep. Rather than
 run a controller to own that lifecycle, every scenario is an object the cluster
 already knows how to expire:
 
-| kind | expiry |
-|------|--------|
-| Chaos Mesh CR | `spec.duration` |
-| Job | `activeDeadlineSeconds` |
+| kind          | expiry                  |
+|---------------|-------------------------|
+| Chaos Mesh CR | `spec.duration`         |
+| Job           | `activeDeadlineSeconds` |
 
 `stop` is therefore only ever an early exit. **If a run is interrupted, do
 nothing** -- the fault ends on its own. Confirm with `./fault.sh status`.
@@ -81,7 +81,7 @@ This fails in the worst possible way: the API server accepts the CR, `kubectl
 get` shows it, and `status.experiment` stays `{}` forever with no error on the
 object. The only evidence is a repeating line in the controller-manager log:
 
-```
+```text
 failed to list *v1alpha1.RemoteCluster: remoteclusters.chaos-mesh.org is forbidden
 ```
 
@@ -96,12 +96,12 @@ Check the *tell*, not just the symptom. Every scenario here is designed so that
 the obvious reading is wrong, and the way to confirm it is working is that the
 distinguishing signal is present:
 
-| id | symptom (expected everywhere) | tell (what makes it this scenario) |
-|----|-------------------------------|------------------------------------|
-| mj-01 | caller latency up ~200ms | product-catalog CPU **and DB time** flat |
+| id    | symptom (expected everywhere)   | tell (what makes it this scenario)                                          |
+|-------|---------------------------------|-----------------------------------------------------------------------------|
+| mj-01 | caller latency up ~200ms        | product-catalog CPU **and DB time** flat                                    |
 | mj-02 | spikes on many services at once | every dependency healthy; services that do not resolve names are unaffected |
-| mj-03 | checkout latency up | checkout CPU *below* normal -- starved, not busy |
-| mj-04 | latency/errors at one component | RPS up **everywhere**; only the weakest saturates |
+| mj-03 | checkout latency up             | checkout CPU *below* normal -- starved, not busy                            |
+| mj-04 | latency/errors at one component | RPS up **everywhere**; only the weakest saturates                           |
 
 **Measure while the scenario is running.** A Chaos Mesh CR recovers the fault
 when `spec.duration` expires but leaves the object behind, so a reading taken
@@ -110,12 +110,12 @@ says `INJECTING` vs `recovered`.
 
 Measured on dev:
 
-| id | result |
-|----|--------|
+| id    | result                                                                                       |
+|-------|----------------------------------------------------------------------------------------------|
 | mj-01 | frontend mean 4.5ms -> 163.7ms; CPU 0.0062 -> 0.0063 cores, DB 0.27ms -> 0.25ms -- both flat |
-| mj-02 | frontend p95 22.7ms -> 646.3ms; checkout 21.2ms -> 1150.6ms; jaeger unaffected |
-| mj-03 | **no signal** at default load -- see the note in its file; needs traffic first |
-| mj-04 | product-catalog 1.76 -> 11.5 rps, checkout 0.08 -> 0.59 rps |
+| mj-02 | frontend p95 22.7ms -> 646.3ms; checkout 21.2ms -> 1150.6ms; jaeger unaffected               |
+| mj-03 | **no signal** at default load -- see the note in its file; needs traffic first               |
+| mj-04 | product-catalog 1.76 -> 11.5 rps, checkout 0.08 -> 0.59 rps                                  |
 
 ## These faults are invisible without the degraded-latency rule
 

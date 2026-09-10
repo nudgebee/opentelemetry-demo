@@ -1,6 +1,5 @@
-# Canonical, commented source for the otel-demo-network-alerts PrometheusRule.
-# The object applied to the cluster is byte-different only in that a yaml round-trip
-# stripped these comments. Intended home: the fork's deploy/kubernetes/sample-app/alerts/.
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
 #
 # These three rules close the NetOps and DBOps gaps in the existing demo alert pack.
 # Before them the pack could only ever produce AppOps alerts (gRPC/HTTP error rates) plus
