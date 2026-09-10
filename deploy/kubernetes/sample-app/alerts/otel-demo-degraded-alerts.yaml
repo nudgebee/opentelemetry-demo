@@ -1,0 +1,158 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# A DEGRADED tier for the demo's latency alerting.
+#
+# The existing OtelDemoHighLatency fires at p95 > 5s. That threshold is calibrated
+# for the flag-driven faults, which make a service sleep for seconds at a time --
+# it is a "the service is broken" rule, not a "the service is slow" rule.
+#
+# Real-mechanism faults do not look like that. Measured on dev 2026-09-08 with
+# 200ms of network delay injected toward product-catalog (faults/mj-01):
+#
+#     frontend p95 baseline   22.7 ms
+#     frontend p95 under load 894.6 ms      <- 39x baseline
+#     OtelDemoHighLatency threshold  5000 ms
+#
+# A storefront serving a 0.9 second p95 is a serious user-facing incident, and the
+# pack could not see it -- the fault ran for eleven minutes and raised no event at
+# all. Every realistic latency fault lands in this same blind spot, because real
+# degradation is sub-second.
+#
+# 250ms is chosen to sit an order of magnitude above the demo's normal p95 (~23ms)
+# and well below what the injected faults produce, so it is neither noisy at rest
+# nor dependent on the exact fault magnitude. Raise it if the demo's baseline load
+# is increased substantially.
+#
+# This complements rather than replaces the 5s rule: the two tiers say different
+# things, and an incident that trips both is worth ranking above one that trips
+# only this.
+#
+# NOTE ON NAMESPACES -- there are two, and they are not the same thing.
+# `metadata.namespace` is where the PrometheusRule object lives (wherever your
+# Prometheus operator watches for rules). The `namespace="demo"` selector inside
+# each PromQL expression is the namespace the DEMO runs in. If you install the
+# demo somewhere other than `demo`, every selector below must be updated or the
+# rules will load, evaluate cleanly, and never fire -- there is no error for
+# a label selector that matches nothing.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: otel-demo-degraded-alerts
+  labels:
+    app: otel-demo
+spec:
+  groups:
+    - name: otel-demo-degraded
+      rules:
+        - alert: OtelDemoLatencyDegraded
+          expr: |
+            (
+              histogram_quantile(0.95,
+                sum by (service_name, http_route, k8s_deployment_name, pod, namespace, le) (
+                  rate({__name__=~"http_server_request_duration_(seconds_)?bucket", namespace="demo"}[2m])
+                )
+              )
+            ) > 0.25
+          for: 2m
+          labels:
+            severity: warning
+            ops_domain: appops
+          annotations:
+            summary: "Degraded latency for {{ $labels.service_name }} {{ $labels.http_route }} in demo namespace"
+            description: |
+              p95 is well above this service's normal range but below the
+              hard-failure threshold -- the shape of a real degradation rather
+              than an outage.
+              Service: {{ $labels.service_name }}
+              Deployment: {{ $labels.k8s_deployment_name }}
+              p95: {{ $value | printf "%.3f" }}s
+
+        # gRPC, seconds family (rpc_server_call_duration): checkout,
+        # product-catalog, jaeger.
+        #
+        # The pack alerts on gRPC ERROR RATE but has never had a gRPC LATENCY rule,
+        # so a gRPC service could get arbitrarily slow while returning OK and stay
+        # completely silent. Measured on dev 2026-09-09 during faults/mj-02:
+        # checkout's mean went 21.2ms -> 1150.6ms (54x) and product-catalog
+        # 3.0ms -> 79ms (26x). Neither raised anything; the only event in the whole
+        # incident was for frontend, over HTTP.
+        #
+        # 250ms matches the HTTP tier. Idle p95s are checkout 46ms, jaeger 25ms,
+        # product-catalog 9ms, so there is ~5x headroom over the noisiest of them.
+        - alert: OtelDemoGRPCLatencyDegraded
+          expr: |
+            (
+              histogram_quantile(0.95,
+                sum by (service_name, rpc_method, k8s_deployment_name, pod, namespace, le) (
+                  rate({__name__=~"rpc_server_call_duration_(seconds_)?bucket", namespace="demo"}[2m])
+                )
+              )
+            ) > 0.25
+          for: 2m
+          labels:
+            severity: warning
+            ops_domain: appops
+          annotations:
+            summary: "Degraded gRPC latency for {{ $labels.service_name }} {{ $labels.rpc_method }} in demo namespace"
+            description: |
+              gRPC p95 is well above this service's normal range while requests are
+              still succeeding -- slow, not failing, which the error-rate rules
+              cannot see.
+              Service: {{ $labels.service_name }}
+              Method: {{ $labels.rpc_method }}
+              p95: {{ $value | printf "%.3f" }}s
+
+        # gRPC, milliseconds family (rpc_server_duration): ad.
+        # Same old/new semconv split the error-rate rules already carry two copies
+        # for -- ad emits the older name with a numeric status code, everything else
+        # emits the newer one. Dropping either silences half the services.
+        - alert: OtelDemoGRPCLatencyDegradedLegacy
+          expr: |
+            (
+              histogram_quantile(0.95,
+                sum by (service_name, rpc_method, k8s_deployment_name, pod, namespace, le) (
+                  rate({__name__=~"rpc_server_duration_(milliseconds_)?bucket", namespace="demo"}[2m])
+                )
+              )
+            ) > 250
+          for: 2m
+          labels:
+            severity: warning
+            ops_domain: appops
+          annotations:
+            summary: "Degraded gRPC latency for {{ $labels.service_name }} {{ $labels.rpc_method }} in demo namespace"
+            description: |
+              gRPC p95 is well above this service's normal range while requests are
+              still succeeding -- slow, not failing, which the error-rate rules
+              cannot see.
+              Service: {{ $labels.service_name }}
+              Method: {{ $labels.rpc_method }}
+              p95: {{ $value | printf "%.0f" }}ms
+
+        # The legacy HTTP semconv twin. frontend emits http_server_duration in
+        # MILLISECONDS and never the newer *_request_duration_seconds, so without
+        # this the storefront -- the one service whose latency a viewer actually
+        # sees -- is not covered by the rule above at all.
+        - alert: OtelDemoLatencyDegradedLegacy
+          expr: |
+            (
+              histogram_quantile(0.95,
+                sum by (service_name, http_method, k8s_deployment_name, pod, namespace, le) (
+                  rate({__name__=~"http_server_duration_(milliseconds_)?bucket", namespace="demo"}[2m])
+                )
+              )
+            ) > 250
+          for: 2m
+          labels:
+            severity: warning
+            ops_domain: appops
+          annotations:
+            summary: "Degraded latency for {{ $labels.service_name }} in demo namespace"
+            description: |
+              p95 is well above this service's normal range but below the
+              hard-failure threshold -- the shape of a real degradation rather
+              than an outage.
+              Service: {{ $labels.service_name }}
+              Deployment: {{ $labels.k8s_deployment_name }}
+              p95: {{ $value | printf "%.0f" }}ms

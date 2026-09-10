@@ -1,0 +1,37 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Required alongside a NAMESPACE-SCOPED Chaos Mesh install (clusterScoped=false).
+#
+# chaos-mesh 2.8.x still watches the cluster-scoped RemoteCluster CRD even in
+# namespace-scoped mode, but its namespaced RBAC does not grant it. The manager's
+# cache then never finishes syncing, so NO chaos object is ever reconciled: the CR
+# is accepted by the API server, sits with an empty `status.experiment`, and
+# nothing happens. There is no error on the CR itself -- the only evidence is a
+# repeating "failed to list *v1alpha1.RemoteCluster ... forbidden" in the
+# controller-manager log.
+#
+# This grants read-only access to that one CRD, which has no instances. It does
+# not widen what Chaos Mesh can act on: the ability to inject faults still comes
+# from the namespaced RoleBinding created by the chart for the target namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: chaos-mesh-remotecluster-read
+rules:
+  - apiGroups: ["chaos-mesh.org"]
+    resources: ["remoteclusters", "remoteclusters/status"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: chaos-mesh-remotecluster-read
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: chaos-mesh-remotecluster-read
+subjects:
+  - kind: ServiceAccount
+    name: chaos-controller-manager
+    namespace: chaos-mesh

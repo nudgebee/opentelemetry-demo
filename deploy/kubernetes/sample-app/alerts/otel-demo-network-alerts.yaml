@@ -1,0 +1,212 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# NOTE ON NAMESPACES -- there are two, and they are not the same thing.
+# `metadata.namespace` is where the PrometheusRule object lives (wherever your
+# Prometheus operator watches for rules). The `namespace="demo"` selector inside
+# each PromQL expression is the namespace the DEMO runs in. If you install the
+# demo somewhere other than `demo`, every selector below must be updated or the
+# rules will load, evaluate cleanly, and never fire -- there is no error for
+# a label selector that matches nothing.
+#
+# These three rules close the NetOps and DBOps gaps in the existing demo alert pack.
+# Before them the pack could only ever produce AppOps alerts (gRPC/HTTP error rates) plus
+# whatever the Kubernetes event path raised, so a database-rooted incident showed up as
+# "several services are throwing errors" with nothing naming the database.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: otel-demo-network-alerts
+  labels:
+    app: otel-demo
+spec:
+  groups:
+    - name: otel-demo-network
+      rules:
+        # NetOps. Source data is the NudgeBee node agent's eBPF TCP collector, which
+        # carries no namespace/pod labels of its own -- app_id is the only workload
+        # identity on the series, so label_replace rewrites it into the namespace +
+        # k8s_deployment_name pair the event subject mapper expects.
+        #
+        # k8s_deployment_name is deliberately the DESTINATION, not the client. The mapper
+        # feeds it into subject_owner and correlation keys on subject_owner: with the
+        # client there (measured 2026-09-08) the alert landed with subject_name=astronomy-db
+        # but subject_owner=product-catalog, and it opened a SECOND incident group instead
+        # of joining the database's. The client is preserved in app_id, which the mapper
+        # ignores.
+        #
+        # 5m window, not 2m: while the destination is in CrashLoopBackOff the client backs
+        # off too, and a 2m rate dipped under the threshold between restarts, flapping the
+        # alert between firing and inactive.
+        - alert: OtelDemoServiceConnectFailures
+          expr: |
+            label_replace(
+              label_replace(
+                sum by (app_id, destination_workload_namespace, destination_workload_name) (
+                  rate(container_net_tcp_failed_connects_total{destination_workload_namespace="demo"}[5m])
+                ) > 0.01,
+                "namespace", "$1", "destination_workload_namespace", "(.+)"),
+              "k8s_deployment_name", "$1", "destination_workload_name", "(.+)")
+          for: 1m
+          labels:
+            severity: critical
+            ops_domain: netops
+          annotations:
+            summary: "Services cannot open TCP connections to {{ $labels.destination_workload_name }} in demo namespace"
+            description: |
+              TCP connection attempts are being refused or timing out.
+              Destination: {{ $labels.destination_workload_namespace }}/{{ $labels.destination_workload_name }}
+              Client: {{ $labels.app_id }}
+              Failed connects: {{ $value | printf "%.2f" }}/s
+
+        # DBOps, datastore side. OtelDemoPostgresQueryLatencyHigh only covers a DEGRADED
+        # database. A dead one produces no latency signal at all: connection refusals
+        # return in under a millisecond and the client still counts them as operations,
+        # so neither mean latency nor operation rate moves. Measured 2026-09-08 with
+        # astronomy-db in CrashLoopBackOff: product-catalog held 1.0 query/s at 0.4ms for
+        # several minutes. Availability has to be read from the datastore itself.
+        #
+        # The sum by () is load-bearing, not tidiness: kube_deployment_status_replicas_available
+        # carries the kube-state-metrics pod in its `pod` label, and leaving it in place
+        # would point the event subject at kube-state-metrics instead of the database.
+        - alert: OtelDemoDatabaseUnavailable
+          expr: |
+            label_replace(
+              sum by (namespace, deployment) (
+                kube_deployment_status_replicas_available{namespace="demo", deployment=~"astronomy-db|valkey-cart"}
+              ) == 0,
+              "k8s_deployment_name", "$1", "deployment", "(.+)")
+          for: 1m
+          labels:
+            severity: critical
+            ops_domain: dbops
+          annotations:
+            summary: "Datastore {{ $labels.deployment }} has no available instance in demo namespace"
+            description: |
+              Every replica of this datastore is down, so no client can obtain a
+              connection. Dependent services will fail outright rather than slow down.
+              Datastore: {{ $labels.namespace }}/{{ $labels.deployment }}
+
+        # DBOps, measured on the wire. The node agent's eBPF L7 parser times every
+        # query between a client and a datastore, so unlike the SDK metrics this
+        # needs no application instrumentation and cannot be fooled by an app that
+        # stops reporting.
+        #
+        # That independence is the point. The two rules below it answer "is the
+        # datastore up" and "has this client given up". Neither answers "are queries
+        # slow", which is the shape of the incidents that are hardest to diagnose:
+        # a stalled lock or a saturating analytics workload leaves the database
+        # running, answering, and idle on CPU while every query behind it blocks.
+        # Paired with container CPU, this rule gives the distinguishing read:
+        # queries slow AND datastore CPU flat means contention, not saturation.
+        #
+        # One rule covers postgres and redis via __name__; the agent exports a
+        # separate metric family per protocol and they are otherwise identical.
+        # Attribution is the DESTINATION for the same reason as the NetOps rule
+        # above -- the datastore is the subject, not whoever happened to query it.
+        #
+        # Idle p95 for astronomy-db is ~4.75ms, so 250ms is ~50x headroom.
+        - alert: OtelDemoDatastoreQueryLatencyHigh
+          expr: |
+            label_replace(
+              label_replace(
+                histogram_quantile(0.95,
+                  sum by (destination_workload_namespace, destination_workload_name, le) (
+                    rate({__name__=~"container_(postgres|redis)_queries_duration_seconds_total_bucket",
+                          destination_workload_namespace="demo"}[5m])
+                  )
+                ) > 0.25,
+                "namespace", "$1", "destination_workload_namespace", "(.+)"),
+              "k8s_deployment_name", "$1", "destination_workload_name", "(.+)")
+          for: 2m
+          labels:
+            severity: warning
+            ops_domain: dbops
+          annotations:
+            summary: "Slow queries against {{ $labels.destination_workload_name }} in demo namespace"
+            description: |
+              Query time measured on the wire is well above normal for this
+              datastore. Check its CPU before concluding it is overloaded -- flat
+              CPU with slow queries means contention (a lock, a stalled
+              transaction), not saturation.
+              Datastore: {{ $labels.destination_workload_namespace }}/{{ $labels.destination_workload_name }}
+              p95: {{ $value | printf "%.3f" }}s
+
+        # DBOps, the failing-but-reachable case. The other three datastore rules each
+        # need a different thing to be true, and none of them covers a database that
+        # is up, accepting connections, and returning errors:
+        #
+        #   OtelDemoDatabaseUnavailable        needs zero replicas
+        #   OtelDemoDatabaseOperationsStopped  needs the client to give up entirely
+        #   OtelDemoDatastoreQueryLatencyHigh  needs queries to be slow, not failing
+        #
+        # That gap is not hypothetical -- permission denied after a credential
+        # rotation, a bad schema migration, constraint violations after a bad
+        # release. The database is healthy by every infrastructure measure and every
+        # query is rejected. The SDK metric cannot see it either: measured
+        # 2026-09-10, db_client_operation_duration carries no error or status label
+        # on this stack at all.
+        #
+        # `status` here means the server ANSWERED with an error, which is different
+        # from being unable to reach it -- a refused connection produces no protocol
+        # exchange and shows up at L4 in OtelDemoServiceConnectFailures instead.
+        # Verified during a real astronomy-db outage: at L7 both ok and failed were
+        # 0/s while failed TCP connects ran at 0.319/s. The layers are not
+        # redundant, they see different failures.
+        #
+        # 1% matches the pack's HTTP and gRPC error-rate rules. Real datastores here
+        # idle at 0.01-0.03% failed, so this sits about 30x above background.
+        - alert: OtelDemoDatastoreQueryErrors
+          expr: |
+            label_replace(
+              label_replace(
+                (
+                  sum by (destination_workload_namespace, destination_workload_name) (
+                    rate({__name__=~"container_(postgres|redis)_queries_total",
+                          destination_workload_namespace="demo", status="failed"}[5m])
+                  )
+                  /
+                  sum by (destination_workload_namespace, destination_workload_name) (
+                    rate({__name__=~"container_(postgres|redis)_queries_total",
+                          destination_workload_namespace="demo"}[5m])
+                  )
+                ) > 0.01,
+                "namespace", "$1", "destination_workload_namespace", "(.+)"),
+              "k8s_deployment_name", "$1", "destination_workload_name", "(.+)")
+          for: 2m
+          labels:
+            severity: critical
+            ops_domain: dbops
+          annotations:
+            summary: "Queries against {{ $labels.destination_workload_name }} are failing in demo namespace"
+            description: |
+              The datastore is reachable and answering, but rejecting queries. This
+              is not a connectivity or capacity problem -- look for credentials, a
+              recent migration, or a schema change rather than for load.
+              Datastore: {{ $labels.destination_workload_namespace }}/{{ $labels.destination_workload_name }}
+              Failed: {{ $value | humanizePercentage }}
+
+        # DBOps, client side. Complements the rule above by naming the dependent service
+        # rather than the datastore. Bounded by Prometheus staleness -- the series
+        # disappears ~5m after the last sample -- so it only fires in the window right
+        # after the database goes away, which is the window that matters.
+        # Verified firing 2026-09-08 at 11:58:03, and it correlated to the OOM as
+        # downstream_impact at dependency_distance 1.
+        - alert: OtelDemoDatabaseOperationsStopped
+          expr: |
+            sum by (namespace, k8s_deployment_name, service_name, server_address, db_system_name) (
+              rate({__name__=~"db_client_operation_duration_(seconds_)?count",
+                    namespace="demo", db_operation_name="sql.conn.query"}[2m])
+            ) == 0
+          for: 1m
+          labels:
+            severity: critical
+            ops_domain: dbops
+          annotations:
+            summary: "{{ $labels.service_name }} is executing no {{ $labels.db_system_name }} queries against {{ $labels.server_address }}"
+            description: |
+              Database operations from this service have dropped to zero while the
+              service is still receiving traffic, which means the database is
+              unreachable rather than idle.
+              Service: {{ $labels.service_name }}
+              Database: {{ $labels.db_system_name }} at {{ $labels.server_address }}

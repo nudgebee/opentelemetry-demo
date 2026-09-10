@@ -1,0 +1,65 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# id:       mj-02
+# category: network
+# summary:  ~500ms added to every DNS lookup the demo services make.
+#
+# Mechanism: latency on the app pods' egress toward the cluster DNS service --
+# a real network condition on the DNS path, not fabricated DNS answers.
+#
+# Note the direction. The delay is applied to the DEMO pods' egress toward the
+# DNS ClusterIP, not to CoreDNS itself: CoreDNS lives in kube-system, and a
+# namespace-scoped Chaos Mesh install cannot target it. externalTargets takes a
+# host rather than a namespaced selector, so it sidesteps that entirely, and the
+# demo pod's tc rules see the ClusterIP pre-DNAT so the match still works.
+# CoreDNS serves only DNS, so this stays scoped to DNS traffic.
+#
+# Expected symptoms:
+#   - intermittent p95/p99 spikes on outbound calls across MANY services at once,
+#     tracking new-connection setup rather than any one dependency's load
+#   - every dependency stays healthy -- flat CPU, query time and error rate;
+#     services that keep connections alive are affected least
+#   - CoreDNS's own CPU stays flat; the delay is on the path to it
+#
+# The classic "it is always DNS" shape: no single component is unhealthy, so
+# anything that reasons per-service will blame the wrong thing.
+#
+# Measured on dev 2026-09-09, five minutes in:
+#
+#     frontend p95           22.7ms  ->  646.3ms   (28x)
+#     checkout gRPC mean     21.2ms  -> 1150.6ms   (54x)
+#     product-catalog mean    3.0ms  ->   79.0ms   (26x)
+#     jaeger                  2.3ms  ->    2.2ms   (unaffected)
+#
+# jaeger staying flat is the useful detail: it is the one service here that does
+# not resolve demo service names on the request path, so it shows the blast
+# radius follows name resolution rather than load or any shared dependency.
+#
+# MEASURE IT WHILE IT IS RUNNING. spec.duration recovers the fault after 10
+# minutes but leaves the CR behind with AllRecovered=true, so a reading taken
+# afterwards looks completely flat and the scenario looks like it did nothing.
+# `fault.sh status` distinguishes the two.
+#
+# Reverts itself after spec.duration even if nothing deletes it.
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: mj-02
+  namespace: __NAMESPACE__
+  labels:
+    maintenance.platform/job: mj-02
+spec:
+  action: delay
+  mode: all
+  duration: 10m
+  direction: to
+  selector:
+    namespaces:
+      - __NAMESPACE__
+  externalTargets:
+    - __DNS_SERVICE__
+  delay:
+    latency: 500ms
+    jitter: 100ms
+    correlation: "50"
