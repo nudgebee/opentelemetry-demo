@@ -7,6 +7,9 @@ the release.
 
 ## Unreleased
 
+* [alerts] Fix false positive 100% error rate for `EventStream` in
+  `OtelDemoGRPCClientErrorRate` alert
+
 * [react-native-app] Fix `ProductCard` price calculation where `nanos` was
   divided by `100_000_000` (1e8) instead of `1_000_000_000` (1e9), inflating
   the displayed price
