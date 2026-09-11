@@ -19,10 +19,6 @@
 #                                        between scenarios, or the previous
 #                                        fault's traces contaminate the next
 #                                        investigation's evidence
-#   ./scenario.sh --check-metrics URL    prove the demo's metrics actually reach
-#                                        the backend NudgeBee queries. Run this
-#                                        after install, BEFORE blaming a
-#                                        scenario for producing nothing
 #
 #   --namespace NS                       demo namespace (default: demo, or $DEMO_NAMESPACE)
 #
@@ -202,58 +198,6 @@ if reach and set(reach) <= {"off"}:
     print("never be enabled. Setting defaultVariant does nothing -- targeting wins.")
 '
     exit 0 ;;
-
-  --check-metrics)
-    # The demo's metrics path is the one thing here that fails completely
-    # silently: the chart is self-contained by default, so its collector ships
-    # metrics to its OWN bundled Prometheus. NudgeBee queries yours, finds
-    # nothing, and every alert rule evaluates cleanly forever without firing.
-    # Nothing logs an error. Traces keep arriving the whole time, because the
-    # node agent reads those off the host with eBPF -- which makes it look like
-    # a partial outage rather than a configuration gap.
-    #
-    # So ask the backend directly instead of trusting healthy-looking pods.
-    PROM="${2:-${PROM_URL:-}}"
-    [ -n "$PROM" ] || die "--check-metrics needs your metrics backend URL, e.g. http://prometheus.monitoring.svc:9090"
-
-    # rpc_server_call_duration_count only exists if the demo's OTLP metrics
-    # reached this backend, so a zero count is unambiguous.
-    Q="count(rpc_server_call_duration_count{namespace=\"${NS}\"})"
-    BODY="$(curl -sG --data-urlencode "query=$Q" "$PROM/api/v1/query" 2>/dev/null || true)"
-    [ -n "$BODY" ] || die "no response from $PROM -- check the URL is reachable from here"
-
-    COUNT="$(printf '%s' "$BODY" | python3 -c '
-import json,sys
-try:
-    r=json.load(sys.stdin)["data"]["result"]
-    print(int(float(r[0]["value"][1])) if r else 0)
-except Exception:
-    print("ERR")
-' 2>/dev/null)"
-
-    case "$COUNT" in
-      ERR|"") echo "Could not parse a response from $PROM."
-              echo "Is it a Prometheus-compatible query API? Raw reply:"
-              printf '%s\n' "$BODY" | head -c 400; echo
-              exit 1 ;;
-      0)      echo "NO DEMO METRICS at $PROM (namespace '$NS')."
-              echo
-              echo "The demo is writing metrics somewhere else -- almost always"
-              echo "its own bundled Prometheus, which nothing forwards to you."
-              echo "Alert rules will load, evaluate without error, and never fire."
-              echo
-              echo "Connect the metrics path, then re-run this:"
-              echo "  -f values-remote-write.example.yaml        (recommended)"
-              echo "  -f values-scrape.example.yaml              (pull-based)"
-              echo "  -f values-external-collector.example.yaml  (own collector)"
-              echo
-              echo "Check what the app is actually pointed at:"
-              echo "  kubectl -n $NS get deploy product-catalog -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name==\"OTEL_COLLECTOR_NAME\")].value}'"
-              exit 1 ;;
-      *)      echo "OK: $COUNT demo metric series at $PROM (namespace '$NS')."
-              echo "The metrics path is connected."
-              exit 0 ;;
-    esac ;;
 
   --drain)
     # Reset, then wait until the previous scenario has genuinely stopped

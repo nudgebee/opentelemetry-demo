@@ -7,6 +7,15 @@ the release.
 
 ## Unreleased
 
+* [flagd] Update readiness and liveness probes to use httpGet on port 8015 and
+  add resource limits and requests
+  ([#472](https://github.com/nudgebee/opentelemetry-demo/pull/472))
+* [fraud-detection] Add resource limits and requests for stability
+  ([#472](https://github.com/nudgebee/opentelemetry-demo/pull/472))
+* [sample-app] Re-wire demo to use external observability stack (VictoriaMetrics,
+  external OTel Collector) in Nudgebee environment
+  ([#472](https://github.com/nudgebee/opentelemetry-demo/pull/472))
+
 * [react-native-app] Fix `ProductCard` price calculation where `nanos` was
   divided by `100_000_000` (1e8) instead of `1_000_000_000` (1e9), inflating
   the displayed price
