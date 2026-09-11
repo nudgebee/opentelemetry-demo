@@ -1,7 +1,5 @@
 {
-  "name": "opentelemetry-demo",
-  "private": true,
   "devDependencies": {
-    "markdownlint-cli": "^0.49.1"
+    "markdownlint-cli": "^0.48.0"
   }
 }
