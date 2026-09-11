@@ -2,8 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0
 
 file_format: definition/2
+attributes:
+  - key: currency_code
+    type: string
+    brief: Currency code
+    stability: stable
+    examples: ["USD", "EUR", "GBP"]
+    note: The currency code involved in the conversion operation
+
 metrics:
-  - name: demo.exchange.conversions
+  - name: app.currency
     brief: Currency conversion counter
     instrument: counter
     unit: "{conversion}"
@@ -11,5 +19,5 @@ metrics:
     annotations:
       service: currency
     attributes:
-      - ref: demo.exchange.to
+      - ref: currency_code
         requirement_level: required

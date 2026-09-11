@@ -4,9 +4,16 @@
 import { NextApiHandler } from 'next';
 import {context, Exception, Span, SpanStatusCode, trace} from '@opentelemetry/api';
 import { SemanticAttributes } from '@opentelemetry/semantic-conventions';
+import { metrics } from '@opentelemetry/api';
+
+const meter = metrics.getMeter('frontend');
+const requestCounter = meter.createCounter('app.frontend.requests');
 
 const InstrumentationMiddleware = (handler: NextApiHandler): NextApiHandler => {
   return async (request, response) => {
+    const {method, url = ''} = request;
+    const [target] = url.split('?');
+
     const span = trace.getSpan(context.active()) as Span;
 
     let httpStatus = 200;
@@ -19,6 +26,7 @@ const InstrumentationMiddleware = (handler: NextApiHandler): NextApiHandler => {
       httpStatus = 500;
       throw error;
     } finally {
+      requestCounter.add(1, { method, target, status: httpStatus });
       span.setAttribute(SemanticAttributes.HTTP_STATUS_CODE, httpStatus);
     }
   };

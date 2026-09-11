@@ -19,6 +19,8 @@
 .codex/
 .cursor/
 .cursorrules
+AGENTS.md
+CLAUDE.md
 
 # Build artifacts
 bin/
@@ -39,7 +41,6 @@ composer.lock
 .dockerhub.env
 .ghcr.env
 *.apk
-/.lycheecache
 
 # Ignore copied/generated protobuf files
 /src/accounting/src/protos/
@@ -56,5 +57,7 @@ docker-compose.override.yml
 src/frontend/cypress/videos
 src/frontend/cypress/screenshots
 src/shipping/target/
+test/tracetesting/tracetesting-vars.yaml
 
 !src/currency/build
+
