@@ -12,33 +12,8 @@ MISSPELL = $(TOOLS_DIR)/$(MISSPELL_BINARY)
 ADDLICENSE_BINARY=bin/addlicense
 ADDLICENSE = $(TOOLS_DIR)/$(ADDLICENSE_BINARY)
 
-DOCKER_CMD ?= docker
 DOCKER_COMPOSE_CMD ?= docker compose
 DOCKER_COMPOSE_ENV=--env-file .env --env-file .env.override
-
-# Compose file layers — combine with -f flags for the desired configuration:
-#   Core (minimal):             compose.yaml
-#   Full (adds Kafka group):    compose.yaml + compose.full.yaml
-#   With observability stack:   + compose.observability.yaml
-#   With extras customizations: + compose.extras.yaml (always last)
-DOCKER_COMPOSE_FILES_CORE=-f compose.yaml
-DOCKER_COMPOSE_FILES_FULL=$(DOCKER_COMPOSE_FILES_CORE) -f compose.full.yaml
-DOCKER_COMPOSE_FILES_OBSERVABILITY=-f compose.observability.yaml
-DOCKER_COMPOSE_FILES_PROFILING=-f compose.profiling.yaml
-DOCKER_COMPOSE_FILES_EXTRAS=-f compose.extras.yaml
-DOCKER_COMPOSE_FILES_TESTS=-f compose.tests.yaml
-DOCKER_COMPOSE_FILES_AGENT=-f compose.agent.yaml
-
-# Default: full demo + observability stack + extras stub
-DOCKER_COMPOSE_FILES=$(DOCKER_COMPOSE_FILES_FULL) $(DOCKER_COMPOSE_FILES_OBSERVABILITY) $(DOCKER_COMPOSE_FILES_EXTRAS)
-
-# Accept either `service=` or `SERVICE=` for single-service targets (build, restart, redeploy).
-# Must be evaluated at file scope; an `ifdef SERVICE` block inside a recipe is a shell command,
-# not a Make conditional, so the alias never takes effect there.
-ifdef SERVICE
-service := $(SERVICE)
-endif
-
 
 # see https://github.com/open-telemetry/build-tools/releases for semconvgen updates
 # Keep links in semantic_conventions/README.md and .vscode/settings.json in sync!
@@ -87,7 +62,6 @@ checklicense:	$(ADDLICENSE)
 		-ignore node_modules/** \
 		-ignore .expo/** \
 		-ignore Pods/** \
-		-ignore **/extras/** \
 		-ignore **/vendor/** \
 		-ignore **/.venv/** \
 		-ignore **/dist/** \
@@ -105,7 +79,6 @@ addlicense:	$(ADDLICENSE)
 		-ignore node_modules/** \
 		-ignore .expo/** \
 		-ignore Pods/** \
-		-ignore **/extras/** \
 		-ignore **/vendor/** \
 		-ignore **/.venv/** \
 		-ignore **/dist/** \
@@ -119,7 +92,7 @@ addlicense:	$(ADDLICENSE)
 .PHONY: checklinks
 checklinks:
 	@echo "Checking links..."
-	lychee --config .lychee.toml --cache .
+	lychee --config .lychee.toml .
 
 # Run all checks in order of speed / likely failure.
 .PHONY: check
@@ -136,26 +109,13 @@ install-tools: $(MISSPELL) $(ADDLICENSE)
 	npm install
 	@echo "All tools installed"
 
-# Use to build all services, or a single service component
-# Example: make build service=frontend
 .PHONY: build
 build:
-ifneq ($(strip $(service)),)
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES) build $(service)
-else
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES) build
-endif
-
-# Build all services including the agentic layer (agent, mcp, chatbot).
-# Used by the agentic CI workflow so those images are present when
-# make run-telemetry-tests-agentic loads them from the artifact.
-.PHONY: build-agentic
-build-agentic:
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES) $(DOCKER_COMPOSE_FILES_AGENT) build
+	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) build
 
 .PHONY: build-and-push
 build-and-push:
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES) build --push
+	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) build --push
 
 # Create multiplatform builder for buildx
 .PHONY: create-multiplatform-builder
@@ -173,16 +133,16 @@ remove-multiplatform-builder:
 .PHONY: build-multiplatform
 build-multiplatform:
 	# Because buildx bake does not support --env-file yet, we need to load it into the environment first.
-	set -a; . ./.env.override; set +a && docker buildx bake $(DOCKER_COMPOSE_FILES) --load --set "*.platform=linux/amd64,linux/arm64"
+	set -a; . ./.env.override; set +a && docker buildx bake -f docker-compose.yml --load --set "*.platform=linux/amd64,linux/arm64"
 
 .PHONY: build-multiplatform-and-push
 build-multiplatform-and-push:
-	# Because buildx bake does not support --env-file yet, we need to load it into the environment first.
-	set -a; . ./.env.override; set +a && docker buildx bake $(DOCKER_COMPOSE_FILES) --push --set "*.platform=linux/amd64,linux/arm64"
+    # Because buildx bake does not support --env-file yet, we need to load it into the environment first.
+	set -a; . ./.env.override; set +a && docker buildx bake -f docker-compose.yml --push --set "*.platform=linux/amd64,linux/arm64"
 
 .PHONY: clean-images
 clean-images:
-	$(DOCKER_CMD) rmi $(shell $(DOCKER_CMD) images --filter=reference="ghcr.io/open-telemetry/demo:latest-*" -q); \
+	@docker rmi $(shell docker images --filter=reference="ghcr.io/open-telemetry/demo:latest-*" -q); \
     if [ $$? -ne 0 ]; \
     then \
     	echo; \
@@ -191,65 +151,14 @@ clean-images:
         false; \
     fi
 
-.PHONY: run-frontend-tests
-run-frontend-tests:
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES) $(DOCKER_COMPOSE_FILES_TESTS) run frontendTests
+.PHONY: run-tests
+run-tests:
+	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) -f docker-compose-tests.yml run frontendTests
+	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) -f docker-compose-tests.yml run traceBasedTests
 
-.PHONY: run-telemetry-tests
-run-telemetry-tests: start
-	$(DOCKER_CMD) build -t opentelemetry-demo-telemetry-tests ./test/telemetry
-	@touch .env.override
-	@# Capture test exit code, always tear down the demo, then propagate the code.
-	@set +e; \
-	$(DOCKER_CMD) run --rm --network opentelemetry-demo \
-		--env-file .env --env-file .env.override \
-		-e TEST_SCOPE=full \
-		-e WARMUP_SECONDS=$${WARMUP_SECONDS:-240} \
-		-e POLL_TIMEOUT=$${POLL_TIMEOUT:-180} \
-		-e WARMUP_PROBE_ENABLED=$${WARMUP_PROBE_ENABLED:-true} \
-		-e WARMUP_PROBE_CHECKOUTS=$${WARMUP_PROBE_CHECKOUTS:-5} \
-		-e WARMUP_PROBE_TIMEOUT=$${WARMUP_PROBE_TIMEOUT:-120} \
-		opentelemetry-demo-telemetry-tests; \
-	rc=$$?; \
-	$(MAKE) stop; \
-	exit $$rc
-
-.PHONY: run-telemetry-tests-minimal
-run-telemetry-tests-minimal: start-minimal
-	$(DOCKER_CMD) build -t opentelemetry-demo-telemetry-tests ./test/telemetry
-	@touch .env.override
-	@set +e; \
-	$(DOCKER_CMD) run --rm --network opentelemetry-demo \
-		--env-file .env --env-file .env.override \
-		-e TEST_SCOPE=minimal \
-		-e WARMUP_SECONDS=$${WARMUP_SECONDS:-240} \
-		-e POLL_TIMEOUT=$${POLL_TIMEOUT:-180} \
-		-e WARMUP_PROBE_ENABLED=$${WARMUP_PROBE_ENABLED:-true} \
-		-e WARMUP_PROBE_CHECKOUTS=$${WARMUP_PROBE_CHECKOUTS:-5} \
-		-e WARMUP_PROBE_TIMEOUT=$${WARMUP_PROBE_TIMEOUT:-120} \
-		opentelemetry-demo-telemetry-tests; \
-	rc=$$?; \
-	$(MAKE) stop; \
-	exit $$rc
-
-.PHONY: run-telemetry-tests-agentic
-run-telemetry-tests-agentic:
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES) $(DOCKER_COMPOSE_FILES_AGENT) up --force-recreate --remove-orphans --detach
-	$(DOCKER_CMD) build -t opentelemetry-demo-telemetry-tests ./test/telemetry
-	@touch .env.override
-	@set +e; \
-	$(DOCKER_CMD) run --rm --network opentelemetry-demo \
-		--env-file .env --env-file .env.override \
-		-e TEST_SCOPE=agentic \
-		-e WARMUP_SECONDS=$${WARMUP_SECONDS:-240} \
-		-e POLL_TIMEOUT=$${POLL_TIMEOUT:-180} \
-		-e WARMUP_PROBE_ENABLED=false \
-		-e WARMUP_PROBE_CHECKOUTS=0 \
-		-e WARMUP_PROBE_TIMEOUT=$${WARMUP_PROBE_TIMEOUT:-120} \
-		opentelemetry-demo-telemetry-tests; \
-	rc=$$?; \
-	$(MAKE) stop; \
-	exit $$rc
+.PHONY: run-tracetesting
+run-tracetesting:
+	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) -f docker-compose-tests.yml run traceBasedTests ${SERVICES_TO_TEST}
 
 .PHONY: generate-protobuf
 generate-protobuf:
@@ -277,73 +186,31 @@ check-clean-work-tree:
 
 .PHONY: start
 start:
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES) up --force-recreate --remove-orphans --detach
+	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) up --force-recreate --remove-orphans --detach
 	@echo ""
 	@echo "OpenTelemetry Demo is running."
 	@echo "Go to http://localhost:8080 for the demo UI."
 	@echo "Go to http://localhost:8080/jaeger/ui for the Jaeger UI."
 	@echo "Go to http://localhost:8080/grafana/ for the Grafana UI."
+	@echo "Go to http://localhost:8080/loadgen/ for the Load Generator UI."
 	@echo "Go to http://localhost:8080/feature/ to change feature flags."
 	@echo "Go to http://localhost:8080/telemetry/ for the Weaver generated telemetry documentation."
 
 .PHONY: start-minimal
 start-minimal:
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES_CORE) $(DOCKER_COMPOSE_FILES_OBSERVABILITY) $(DOCKER_COMPOSE_FILES_EXTRAS) up --force-recreate --remove-orphans --detach
+	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) -f docker-compose.minimal.yml up --force-recreate --remove-orphans --detach
 	@echo ""
 	@echo "OpenTelemetry Demo in minimal mode is running."
 	@echo "Go to http://localhost:8080 for the demo UI."
 	@echo "Go to http://localhost:8080/jaeger/ui for the Jaeger UI."
 	@echo "Go to http://localhost:8080/grafana/ for the Grafana UI."
-	@echo "Go to http://localhost:8080/feature/ to change feature flags."
-	@echo "Go to http://localhost:8080/telemetry/ for the Weaver generated telemetry documentation."
-
-.PHONY: start-no-o11y
-start-no-o11y:
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES_FULL) $(DOCKER_COMPOSE_FILES_EXTRAS) up --force-recreate --remove-orphans --detach
-	@echo ""
-	@echo "OpenTelemetry Demo is running (no observability stack)."
-	@echo "Go to http://localhost:8080 for the demo UI."
-	@echo "Go to http://localhost:8080/feature/ to change feature flags."
-	@echo "Go to http://localhost:8080/telemetry/ for the Weaver generated telemetry documentation."
-
-.PHONY: start-minimal-no-o11y
-start-minimal-no-o11y:
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES_CORE) $(DOCKER_COMPOSE_FILES_EXTRAS) up --force-recreate --remove-orphans --detach
-	@echo ""
-	@echo "OpenTelemetry Demo in minimal mode is running (no observability stack)."
-	@echo "Go to http://localhost:8080 for the demo UI."
-	@echo "Go to http://localhost:8080/feature/ to change feature flags."
-	@echo "Go to http://localhost:8080/telemetry/ for the Weaver generated telemetry documentation."
-
-.PHONY: start-profiling
-start-profiling:
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES_FULL) $(DOCKER_COMPOSE_FILES_OBSERVABILITY) $(DOCKER_COMPOSE_FILES_PROFILING) $(DOCKER_COMPOSE_FILES_EXTRAS) up --force-recreate --remove-orphans --detach
-	@echo ""
-	@echo "OpenTelemetry Demo in profiling mode is running."
-	@echo "Go to http://localhost:8080 for the demo UI."
-	@echo "Go to http://localhost:8080/jaeger/ui for the Jaeger UI."
-	@echo "Go to http://localhost:8080/grafana/ for the Grafana UI."
-	@echo "Go to http://localhost:8080/profiles/ for the Firepit UI."
-	@echo "Go to http://localhost:8080/telemetry/ for the Weaver generated telemetry documentation."
-
-.PHONY: start-agentic
-start-agentic:
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES) $(DOCKER_COMPOSE_FILES_AGENT) up --force-recreate --remove-orphans --detach
-	@echo ""
-	@echo "OpenTelemetry Demo with the agent, mcp and chatbot is running."
-	@echo "Go to http://localhost:8080 for the demo UI."
-	@echo "Go to http://localhost:8080/jaeger/ui for the Jaeger UI."
-	@echo "Go to http://localhost:8080/grafana/ for the Grafana UI."
-	@echo "Go to http://localhost:8080/feature/ to change feature flags."
-	@echo "Go to http://localhost:8080/telemetry/ for the Weaver generated telemetry documentation."
-	@echo "Go to http://localhost:8080/chatbot/ for interacting with demo application using an agent."
+	@echo "Go to http://localhost:8080/loadgen/ for the Load Generator UI."
+	@echo "Go to https://opentelemetry.io/docs/demo/feature-flags/ to learn how to change feature flags."
 
 .PHONY: stop
 stop:
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES) down --remove-orphans --volumes
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES) $(DOCKER_COMPOSE_FILES_AGENT) down --remove-orphans --volumes
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES) $(DOCKER_COMPOSE_FILES_PROFILING) down --remove-orphans --volumes
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES) $(DOCKER_COMPOSE_FILES_TESTS) down --remove-orphans --volumes
+	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) down --remove-orphans --volumes
+	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) -f docker-compose-tests.yml down --remove-orphans --volumes
 	@echo ""
 	@echo "OpenTelemetry Demo is stopped."
 
@@ -351,29 +218,39 @@ stop:
 # Example: make restart service=frontend
 .PHONY: restart
 restart:
-ifneq ($(strip $(service)),)
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES) stop $(service)
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES) rm --force $(service)
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES) create $(service)
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES) start $(service)
+# work with `service` or `SERVICE` as input
+ifdef SERVICE
+	service := $(SERVICE)
+endif
+
+ifdef service
+	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) stop $(service)
+	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) rm --force $(service)
+	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) create $(service)
+	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) start $(service)
 else
-	@echo "Please provide a service name using 'service=<name>' or 'SERVICE=<name>'"
+	@echo "Please provide a service name using `service=[service name]` or `SERVICE=[service name]`"
 endif
 
 # Use to rebuild and restart (redeploy) a single service component
 # Example: make redeploy service=frontend
 .PHONY: redeploy
 redeploy:
-ifneq ($(strip $(service)),)
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES) build $(service)
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES) stop $(service)
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES) rm --force $(service)
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES) create $(service)
-	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) $(DOCKER_COMPOSE_FILES) start $(service)
+# work with `service` or `SERVICE` as input
+ifdef SERVICE
+	service := $(SERVICE)
+endif
+
+ifdef service
+	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) build $(service)
+	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) stop $(service)
+	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) rm --force $(service)
+	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) create $(service)
+	$(DOCKER_COMPOSE_CMD) $(DOCKER_COMPOSE_ENV) start $(service)
 else
-	@echo "Please provide a service name using 'service=<name>' or 'SERVICE=<name>'"
+	@echo "Please provide a service name using `service=[service name]` or `SERVICE=[service name]`"
 endif
 
 .PHONY: build-react-native-android
 build-react-native-android:
-	$(DOCKER_CMD) build -f src/react-native-app/android.Dockerfile --platform=linux/amd64 --output=. src/react-native-app
+	docker build -f src/react-native-app/android.Dockerfile --platform=linux/amd64 --output=. src/react-native-app

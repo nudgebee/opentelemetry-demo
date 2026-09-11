@@ -5,22 +5,15 @@ package kafka
 import (
 	"fmt"
 	"log/slog"
-	"os"
+	"time"
 
 	"github.com/IBM/sarama"
 )
 
 var (
-	Topic           = getTopic()
+	Topic           = "orders"
 	ProtocolVersion = sarama.V3_0_0_0
 )
-
-func getTopic() string {
-	if topic := os.Getenv("KAFKA_TOPIC"); topic != "" {
-		return topic
-	}
-	return "orders"
-}
 
 type saramaLogger struct {
 	logger *slog.Logger
@@ -41,17 +34,16 @@ func CreateKafkaProducer(brokers []string, logger *slog.Logger) (sarama.AsyncPro
 	sarama.Logger = &saramaLogger{logger: logger}
 
 	saramaConfig := sarama.NewConfig()
-	saramaConfig.Producer.Return.Successes = true
+	saramaConfig.Producer.Return.Successes = false
 	saramaConfig.Producer.Return.Errors = true
+	saramaConfig.Producer.Timeout = 5 * time.Second
+	saramaConfig.Net.WriteTimeout = 5 * time.Second
 
 	// Sarama has an issue in a single broker kafka if the kafka broker is restarted.
 	// This setting is to prevent that issue from manifesting itself, but may swallow failed messages.
 	saramaConfig.Producer.RequiredAcks = sarama.NoResponse
 
 	saramaConfig.Version = ProtocolVersion
-
-	// So we can know the partition and offset of messages.
-	saramaConfig.Producer.Return.Successes = true
 
 	producer, err := sarama.NewAsyncProducer(brokers, saramaConfig)
 	if err != nil {
@@ -62,8 +54,8 @@ func CreateKafkaProducer(brokers []string, logger *slog.Logger) (sarama.AsyncPro
 	go func() {
 		for err := range producer.Errors() {
 			logger.Error(fmt.Sprintf("Failed to write message: %+v", err))
-
 		}
 	}()
+
 	return producer, nil
 }
