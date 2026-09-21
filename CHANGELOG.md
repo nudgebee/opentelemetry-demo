@@ -7,6 +7,9 @@ the release.
 
 ## Unreleased
 
+* [load-generator] Fix memory leak in browser scenario by explicitly closing
+  browser context
+  ([#530](https://github.com/open-telemetry/opentelemetry-demo/pull/530))
 * [react-native-app] Fix `ProductCard` price calculation where `nanos` was
   divided by `100_000_000` (1e8) instead of `1_000_000_000` (1e9), inflating
   the displayed price
