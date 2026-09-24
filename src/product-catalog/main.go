@@ -110,24 +110,36 @@ func initDatabase() error {
 func main() {
 	ctx := context.Background()
 
-	// Initialize OpenTelemetry SDK with otelconf
-	sdk, err := otelconf.NewSDK(otelconf.WithContext(ctx))
-	if err != nil {
-		logger.Error(fmt.Sprintf("Failed to initialize OpenTelemetry SDK: %v", err))
-		os.Exit(1)
-	}
-	defer func() {
-		if err := sdk.Shutdown(ctx); err != nil {
-			logger.Error(fmt.Sprintf("Error shutting down OpenTelemetry SDK: %v", err))
+	// Initialize OpenTelemetry SDK with otelconf with timeout and retry backoff
+	var sdk otelconf.SDK
+	var err error
+	for attempt := 1; attempt <= 5; attempt++ {
+		initCtx, initCancel := context.WithTimeout(ctx, 3*time.Second)
+		sdk, err = otelconf.NewSDK(otelconf.WithContext(initCtx))
+		initCancel()
+		if err == nil {
+			break
 		}
-		logger.Info("Shutdown OpenTelemetry SDK")
-	}()
+		logger.Warn(fmt.Sprintf("Attempt %d: Failed to initialize OpenTelemetry SDK: %v", attempt, err))
+		time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+	}
 
-	// Set global providers and propagator
-	otel.SetTracerProvider(sdk.TracerProvider())
-	otel.SetMeterProvider(sdk.MeterProvider())
-	global.SetLoggerProvider(sdk.LoggerProvider())
-	otel.SetTextMapPropagator(sdk.Propagator())
+	if err != nil {
+		logger.Error(fmt.Sprintf("Failed to initialize OpenTelemetry SDK after retries: %v. Continuing without telemetry.", err))
+	} else {
+		defer func() {
+			if err := sdk.Shutdown(ctx); err != nil {
+				logger.Error(fmt.Sprintf("Error shutting down OpenTelemetry SDK: %v", err))
+			}
+			logger.Info("Shutdown OpenTelemetry SDK")
+		}()
+
+		// Set global providers and propagator
+		otel.SetTracerProvider(sdk.TracerProvider())
+		otel.SetMeterProvider(sdk.MeterProvider())
+		global.SetLoggerProvider(sdk.LoggerProvider())
+		otel.SetTextMapPropagator(sdk.Propagator())
+	}
 
 	// Initialize database connection
 	if err := initDatabase(); err != nil {
