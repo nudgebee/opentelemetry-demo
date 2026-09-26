@@ -15,6 +15,7 @@ import oteldemo.Demo.*
 import java.time.Duration.ofMillis
 import java.util.*
 import kotlin.system.exitProcess
+import dev.openfeature.contrib.providers.flagd.Config
 import dev.openfeature.contrib.providers.flagd.FlagdOptions
 import dev.openfeature.contrib.providers.flagd.FlagdProvider
 import dev.openfeature.sdk.Client
@@ -30,8 +31,9 @@ private val logger: Logger = LogManager.getLogger(groupID)
 
 fun main() {
     val options = FlagdOptions.builder()
-    .withGlobalTelemetry(true)
-    .build()
+        .resolverType(Config.Resolver.RPC)
+        .withGlobalTelemetry(true)
+        .build()
     val flagdProvider = FlagdProvider(options)
     OpenFeatureAPI.getInstance().setProvider(flagdProvider)
 
