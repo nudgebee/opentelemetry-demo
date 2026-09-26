@@ -30,8 +30,14 @@ private val logger: Logger = LogManager.getLogger(groupID)
 
 fun main() {
     val options = FlagdOptions.builder()
-    .withGlobalTelemetry(true)
-    .build()
+        .withGlobalTelemetry(true)
+        .deadline(500)
+        .keepAlive(0)
+        .retryBackoffMs(100)
+        .retryBackoffMaxMs(12000)
+        .streamDeadlineMs(600000)
+        .retryGracePeriod(5)
+        .build()
     val flagdProvider = FlagdProvider(options)
     OpenFeatureAPI.getInstance().setProvider(flagdProvider)
 
