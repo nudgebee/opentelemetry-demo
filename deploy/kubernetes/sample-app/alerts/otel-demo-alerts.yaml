@@ -95,11 +95,11 @@ spec:
       expr: |-
         (
           sum by (service_name, k8s_deployment_name, pod, namespace, rpc_service, rpc_method) (
-            rate(rpc_client_duration_count{namespace="demo", rpc_grpc_status_code!="0"}[2m])
+            rate(rpc_client_duration_count{namespace="demo", rpc_grpc_status_code!="0", rpc_method!="EventStream"}[2m])
           )
           /
           sum by (service_name, k8s_deployment_name, pod, namespace, rpc_service, rpc_method) (
-            rate(rpc_client_duration_count{namespace="demo"}[2m])
+            rate(rpc_client_duration_count{namespace="demo", rpc_method!="EventStream"}[2m])
           )
         ) > 0.05
       for: 1m
