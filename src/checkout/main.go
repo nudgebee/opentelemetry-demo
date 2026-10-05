@@ -483,14 +483,20 @@ func (cs *checkout) quoteShipping(ctx context.Context, address *pb.Address, item
 		return nil, fmt.Errorf("failed to marshal ship order request: %+v", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", cs.shippingSvcAddr+"/get-quote", bytes.NewBuffer(quotePayload))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %+v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := cs.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed POST to shipping service: %+v", err)
+	var resp *http.Response
+	for i := 0; i < 2; i++ {
+		req, err := http.NewRequestWithContext(ctx, "POST", cs.shippingSvcAddr+"/get-quote", bytes.NewBuffer(quotePayload))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %+v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err = cs.httpClient.Do(req)
+		if err == nil {
+			break
+		}
+		if i == 1 {
+			return nil, fmt.Errorf("failed POST to shipping service: %+v", err)
+		}
 	}
 	defer resp.Body.Close()
 
