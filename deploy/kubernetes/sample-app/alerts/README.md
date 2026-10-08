@@ -42,7 +42,7 @@ Use `apply-alerts.sh` rather than editing expressions by hand:
                   --release-label <your-kube-prometheus-stack-release>
 ```
 
-## What is here, and why it is split in two
+## What is here, and why it is split up
 
 ### Symptom rules: `otel-demo-alerts.yaml`
 
@@ -70,6 +70,42 @@ Verified against the `postgresSlow` feature flag: healthy gives inactive,
 slow gives firing, and recovery returns it to inactive, with
 `HTTP503_504_Failures` and `HighP95Latency` appearing on `frontend-proxy` at
 the same time as the impacted-service blast radius.
+
+### SLO rules: `otel-demo-slo-alerts.yaml`
+
+Everything above alerts on a service or a dependency. These two alert on a
+promise to the customer, measured on `checkout`'s `PlaceOrder` call: 99% of
+orders succeed, and 99% of orders finish in under 500 ms.
+
+Each rule reports a burn rate -- how many times faster than allowed the 1%
+error budget is being spent -- and fires when it is above 6x over both the
+last 30 minutes and the last 5. The long window says the damage is
+significant, the short one says it is still happening, so a burst that has
+already ended does not fire and the alert clears within minutes of a fix.
+
+`OtelDemoPlaceOrderSuccessSLOAtRisk` was verified against the
+`paymentFailure` flag at `10%`. At steady traffic a 10% failure rate takes
+about 18 minutes to push the 30-minute window over 6%. On our run it fired
+after twelve, because traffic had been raised five-fold two minutes before
+the flag, and a window is weighted by the orders in it.
+`OtelDemoPlaceOrderLatencySLOAtRisk` was verified against
+[Scenario F](../docs/06-undersized-service.md), which is built around it,
+and back-tested against a `postgresSlow=1sec` run, where it was true within
+six minutes of the flag.
+
+### Forecast rule: `otel-demo-forecast-alerts.yaml`
+
+Every other rule fires on damage that is already happening. A slow climb
+never trips any of them, and the first signal is the OOM kill.
+
+`OtelDemoMemoryLimitForecast` fires when a container's memory is on course
+to pass 90% of its limit within seven days, and its value is the number of
+days left. It is `severity: warning`: nothing is failing yet.
+
+Back-tested against a real twelve-day climb in `astronomy-db` that ended in
+an OOM kill, it goes pending 6.6 days before the kill. It has not yet been
+seen firing live. The rule file documents the three guards that keep a
+straight-line forecast from firing on ordinary wobble.
 
 ## Gotcha: do not write a quantile rule on the DB duration metric
 

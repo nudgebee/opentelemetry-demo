@@ -1,0 +1,191 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# SLO rules for the demo's one business transaction: placing an order.
+#
+# The other rule files alert on a service or a dependency: an error rate, a
+# latency, a slow database. This one alerts on a promise made to the customer,
+# so the incident opens with "orders are at risk" and the service or dependency
+# behind it is something the investigation has to find.
+#
+# The promise, measured on checkout's PlaceOrder call:
+#
+#     success   99% of orders are placed without an error
+#     latency   99% of orders are placed in under 500 ms
+#
+# Both leave an error budget of 1%. Each rule reports the BURN RATE: how many
+# times faster than allowed that budget is being spent. At 1x a 30-day budget
+# lasts exactly 30 days; at 6x it is gone in five days, at 30x in one.
+#
+# A rule fires when the burn rate is above 6x over the last 30 minutes AND over
+# the last 5 minutes. The long window says the damage is significant, the short
+# window says it is still happening -- so a burst that has already ended does
+# not fire, and the alert clears within minutes of a fix.
+#
+# This is the multi-window burn-rate shape from the Google SRE Workbook, with
+# shorter windows. The Workbook pairs 6x with a 6-hour window, which suits a
+# production service and means a fault injected into a demo is over long before
+# the rule notices it.
+#
+# Measured on a live cluster at the demo's default load (about 3.5 orders a
+# minute):
+#
+#   - At rest the budget is barely touched: 0.00-0.04% of orders fail per day,
+#     and 0.00-0.06% take longer than 500 ms.
+#   - Thirteen days of history made the success rule true once, for one burst
+#     of failed orders (11x), and the latency rule true on two days: a few short
+#     periods on one, and a postgresSlow run on the other.
+#   - With postgresSlow at 1sec most orders take over a second. The latency
+#     rule was true within six minutes of the flag being set and peaked at 42x.
+#
+# severity is critical for both: above 6x, customers are failing right now.
+#
+# Only the current gRPC metric is covered (rpc_server_call_duration with a
+# string rpc_response_status_code). A checkout image old enough to emit only
+# rpc_server_duration matches nothing here, and the rules stay silent.
+#
+# NOTE ON NAMESPACES -- there are two, and they are not the same thing.
+# `metadata.namespace` is where the PrometheusRule object lives (wherever your
+# Prometheus operator watches for rules). The `namespace="demo"` selector inside
+# each PromQL expression is the namespace the DEMO runs in. If you install the
+# demo somewhere other than `demo`, every selector below must be updated or the
+# rules will load, evaluate cleanly, and never fire -- there is no error for
+# a label selector that matches nothing. apply-alerts.sh does this for you.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: otel-demo-slo-alerts
+  labels:
+    app: otel-demo
+spec:
+  groups:
+    - name: otel-demo-place-order-slo
+      interval: 15s
+      rules:
+        # Failed orders. A window with no failed orders has no failing series,
+        # so the division returns nothing and the rule cannot fire; the same is
+        # true of a window with no orders at all.
+        #
+        # The second matcher on rpc_response_status_code is deliberate. In
+        # PromQL `!="OK"` also matches a series that has no such label, so
+        # without it a checkout that reports no status at all would count
+        # every healthy order as failed.
+        - alert: OtelDemoPlaceOrderSuccessSLOAtRisk
+          expr: |
+            (
+              (
+                sum by (namespace, service_name, k8s_deployment_name, rpc_method) (
+                  rate({
+                    __name__=~"rpc_server_call_duration(_seconds)?_count",
+                    namespace="demo", service_name="checkout",
+                    rpc_method="oteldemo.CheckoutService/PlaceOrder",
+                    rpc_response_status_code!="OK", rpc_response_status_code!=""
+                  }[30m])
+                )
+                /
+                sum by (namespace, service_name, k8s_deployment_name, rpc_method) (
+                  rate({
+                    __name__=~"rpc_server_call_duration(_seconds)?_count",
+                    namespace="demo", service_name="checkout",
+                    rpc_method="oteldemo.CheckoutService/PlaceOrder"
+                  }[30m])
+                )
+              ) / 0.01 > 6
+            )
+            and
+            (
+              (
+                sum by (namespace, service_name, k8s_deployment_name, rpc_method) (
+                  rate({
+                    __name__=~"rpc_server_call_duration(_seconds)?_count",
+                    namespace="demo", service_name="checkout",
+                    rpc_method="oteldemo.CheckoutService/PlaceOrder",
+                    rpc_response_status_code!="OK", rpc_response_status_code!=""
+                  }[5m])
+                )
+                /
+                sum by (namespace, service_name, k8s_deployment_name, rpc_method) (
+                  rate({
+                    __name__=~"rpc_server_call_duration(_seconds)?_count",
+                    namespace="demo", service_name="checkout",
+                    rpc_method="oteldemo.CheckoutService/PlaceOrder"
+                  }[5m])
+                )
+              ) / 0.01 > 6
+            )
+          for: 2m
+          labels:
+            severity: critical
+            slo: place-order-success
+          annotations:
+            summary: Place Order success SLO at risk for {{ $labels.service_name }} in demo namespace
+            description: |
+              Orders are failing faster than the 99% success objective allows.
+              Error budget burn rate over the last 30 minutes: {{ printf "%.0f" $value }}x (the last 5 minutes confirm it is still happening).
+              At 6x a 30-day error budget is gone in five days; at 30x in one day.
+              Service: {{ $labels.service_name }}
+              Deployment: {{ $labels.k8s_deployment_name }}
+              Transaction: {{ $labels.rpc_method }}
+
+        # Slow orders. "Good" is the le="0.5" bucket, so the threshold is one of
+        # the histogram's own boundaries and no quantile is interpolated.
+        - alert: OtelDemoPlaceOrderLatencySLOAtRisk
+          expr: |
+            (
+              (
+                1 - (
+                  sum by (namespace, service_name, k8s_deployment_name, rpc_method) (
+                    rate({
+                      __name__=~"rpc_server_call_duration(_seconds)?_bucket",
+                      namespace="demo", service_name="checkout",
+                      rpc_method="oteldemo.CheckoutService/PlaceOrder",
+                      le="0.5"
+                    }[30m])
+                  )
+                  /
+                  sum by (namespace, service_name, k8s_deployment_name, rpc_method) (
+                    rate({
+                      __name__=~"rpc_server_call_duration(_seconds)?_count",
+                      namespace="demo", service_name="checkout",
+                      rpc_method="oteldemo.CheckoutService/PlaceOrder"
+                    }[30m])
+                  )
+                )
+              ) / 0.01 > 6
+            )
+            and
+            (
+              (
+                1 - (
+                  sum by (namespace, service_name, k8s_deployment_name, rpc_method) (
+                    rate({
+                      __name__=~"rpc_server_call_duration(_seconds)?_bucket",
+                      namespace="demo", service_name="checkout",
+                      rpc_method="oteldemo.CheckoutService/PlaceOrder",
+                      le="0.5"
+                    }[5m])
+                  )
+                  /
+                  sum by (namespace, service_name, k8s_deployment_name, rpc_method) (
+                    rate({
+                      __name__=~"rpc_server_call_duration(_seconds)?_count",
+                      namespace="demo", service_name="checkout",
+                      rpc_method="oteldemo.CheckoutService/PlaceOrder"
+                    }[5m])
+                  )
+                )
+              ) / 0.01 > 6
+            )
+          for: 2m
+          labels:
+            severity: critical
+            slo: place-order-latency
+          annotations:
+            summary: Place Order latency SLO at risk for {{ $labels.service_name }} in demo namespace
+            description: |
+              Orders are taking longer than 500 ms more often than the 99% objective allows.
+              Error budget burn rate over the last 30 minutes: {{ printf "%.0f" $value }}x (the last 5 minutes confirm it is still happening).
+              At 6x a 30-day error budget is gone in five days; at 30x in one day.
+              Service: {{ $labels.service_name }}
+              Deployment: {{ $labels.k8s_deployment_name }}
+              Transaction: {{ $labels.rpc_method }}

@@ -1,0 +1,139 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# A FORECAST rule for the demo: warn days before a container reaches its memory
+# limit, instead of after the kernel has already killed it.
+#
+# Every other rule in this pack fires on damage that is already happening. A
+# slow climb never trips any of them: each day looks like the day before, and
+# the first signal is the OOM kill. Measured on a live cluster: astronomy-db
+# (100Mi limit) rose from 47% to 90% of its limit over twelve days, about 3.6
+# points a day, and was OOMKilled. Nothing fired until the kill.
+#
+# Back-tested against that same climb, this rule goes pending 6.6 days before
+# the kill and stays true, without a gap, until the container is within hours
+# of its limit. The value it reports is DAYS LEFT until 90% of the limit, so the
+# alert itself says how long there is to act.
+#
+# Linear extrapolation is easy to fool, so three guards stand between a trend
+# and an alert. Each one removed a false positive seen in the same back-test:
+#
+#   1. Steady climb. The 3-day trend must be worth at least 5 points of the
+#      limit. A container sitting near its limit with a faint upward drift
+#      (kafka at 88%) is not climbing and does not fire.
+#   2. The last day agrees. The 1-day trend must also reach 90% inside the
+#      horizon. A 3-day trend keeps pointing up after the climb has stopped or
+#      turned around (checkout, wobbling around 80%); the last day does not.
+#   3. Three days of history. A container younger than the trend window is
+#      extrapolating its own start-up ramp. kube_pod_container_state_started
+#      resets on every restart, so a container that was just OOMKilled starts
+#      the clock again.
+#
+# `for: 6h` then removes the short blips that survive all three.
+#
+# With those in place, eleven days of history across every container in the
+# namespace produced two alerts: the database above, and `ad`, which stepped
+# from 76% to 88% of its limit and then crept to 90%. It did reach the line,
+# about three days later than the rule first estimated -- a step followed by a
+# plateau is the shape a straight line reads worst, so treat the days-left
+# figure as an estimate and not a deadline.
+#
+# What this rule does NOT cover: a leak fast enough to kill a container within
+# hours. Its trend window is three days by design; a fast leak is over before
+# the container is old enough to be judged.
+#
+# Requires kube-state-metrics (limits, container start time) and kubelet
+# cAdvisor metrics, both part of any kube-prometheus or VictoriaMetrics k8s
+# stack. The service_name and k8s_deployment_name labels are copied from the
+# container name, which the demo chart sets to the component name.
+#
+# NOTE ON NAMESPACES -- there are two, and they are not the same thing.
+# `metadata.namespace` is where the PrometheusRule object lives (wherever your
+# Prometheus operator watches for rules). The `namespace="demo"` selector inside
+# each PromQL expression is the namespace the DEMO runs in. If you install the
+# demo somewhere other than `demo`, every selector below must be updated or the
+# rules will load, evaluate cleanly, and never fire -- there is no error for
+# a label selector that matches nothing. apply-alerts.sh does this for you.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: otel-demo-forecast-alerts
+  labels:
+    app: otel-demo
+spec:
+  groups:
+    - name: otel-demo-memory-forecast
+      # A 3-day trend does not move in 15 seconds; evaluating it that often
+      # only costs query time.
+      interval: 5m
+      rules:
+        - alert: OtelDemoMemoryLimitForecast
+          expr: |
+            label_replace(
+              label_replace(
+                (
+                  (
+                    (
+                      (
+                        0.9 * max by (namespace, pod, container) (
+                          kube_pod_container_resource_limits{namespace="demo", resource="memory"}
+                        )
+                        -
+                        max by (namespace, pod, container) (
+                          container_memory_working_set_bytes{namespace="demo", container!="", container!="POD"}
+                        )
+                      )
+                      /
+                      (
+                        max by (namespace, pod, container) (
+                          deriv(container_memory_working_set_bytes{namespace="demo", container!="", container!="POD"}[3d])
+                        ) * 86400
+                      )
+                    ) > 0
+                  ) < 7
+                )
+                and on (namespace, pod, container)
+                (
+                  max by (namespace, pod, container) (
+                    deriv(container_memory_working_set_bytes{namespace="demo", container!="", container!="POD"}[3d])
+                  ) * 3 * 86400
+                  >
+                  0.05 * max by (namespace, pod, container) (
+                    kube_pod_container_resource_limits{namespace="demo", resource="memory"}
+                  )
+                )
+                and on (namespace, pod, container)
+                (
+                  max by (namespace, pod, container) (
+                    predict_linear(container_memory_working_set_bytes{namespace="demo", container!="", container!="POD"}[1d], 7 * 86400)
+                  )
+                  >
+                  0.9 * max by (namespace, pod, container) (
+                    kube_pod_container_resource_limits{namespace="demo", resource="memory"}
+                  )
+                )
+                and on (namespace, pod, container)
+                (
+                  (
+                    time() - max by (namespace, pod, container) (
+                      kube_pod_container_state_started{namespace="demo"}
+                    )
+                  ) > 3 * 86400
+                ),
+                "service_name", "$1", "container", "(.+)"
+              ),
+              "k8s_deployment_name", "$1", "container", "(.+)"
+            )
+          for: 6h
+          labels:
+            severity: warning
+          annotations:
+            summary: Memory for {{ $labels.service_name }} in demo namespace is forecast to reach its limit
+            description: |
+              At the current rate of growth this container passes 90% of its memory limit in about {{ printf "%.1f" $value }} days.
+              Nothing is failing yet. This is a forecast from the last three days of usage.
+              Service: {{ $labels.service_name }}
+              Deployment: {{ $labels.k8s_deployment_name }}
+              Pod: {{ $labels.pod }}
+              Container: {{ $labels.container }}
+              Days until 90% of the limit: {{ printf "%.1f" $value }}
