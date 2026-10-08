@@ -15,6 +15,7 @@ including the scenarios that produce **no** signal and why -- is in
 | [C](./03-slow-dependency.md) | Slow dependency | `postgresSlow=6sec` | `product-catalog` | ~2.5 min |
 | [D](./04-payment-failure.md) | Payment failure | `paymentFailure=100%` | `checkout` only | -- |
 | [E](./05-payment-unreachable.md) | Payment unreachable | `paymentUnreachable=on` | `checkout` only | ~2.7 min |
+| [F](./06-undersized-service.md) | Undersized service | none: a CPU limit, then more traffic | `checkout` (Place Order SLO) | ~5 min after traffic rises |
 
 ## Which one to demo
 
@@ -30,6 +31,10 @@ including the scenarios that produce **no** signal and why -- is in
 - **Blast-radius reasoning:** [D](./04-payment-failure.md) and
   [E](./05-payment-unreachable.md). The alert fires on the caller, and the
   answer is a service the alert never mentions.
+- **No injected failure:** [F](./06-undersized-service.md). A resource
+  setting is changed and traffic grows; nothing is told to fail. The alert
+  is on the order SLO and the cause is a setting on another service. Its
+  investigation took 24 minutes on our run, not the usual 10.
 
 ## Rules that apply to all of them
 
