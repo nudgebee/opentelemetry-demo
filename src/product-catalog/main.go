@@ -351,8 +351,8 @@ func getProductFromDB(ctx context.Context, productID string) (*pb.Product, error
 	var nanos int32
 
 	if err := row.Scan(&id, &name, &description, &picture, &currencyCode, &units, &nanos, &categoriesStr); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("product not found")
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, sql.ErrNoRows
 		}
 		return nil, fmt.Errorf("failed to scan product row: %w", err)
 	}
@@ -476,10 +476,16 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 		if errors.Is(err, context.DeadlineExceeded) {
 			return nil, status.Errorf(codes.DeadlineExceeded, "request timed out")
 		}
-		msg := fmt.Sprintf("Product Not Found: %s", req.Id)
+		if errors.Is(err, sql.ErrNoRows) {
+			msg := fmt.Sprintf("Product Not Found: %s", req.Id)
+			span.SetStatus(otelcodes.Error, msg)
+			span.AddEvent(msg)
+			return nil, status.Errorf(codes.NotFound, msg)
+		}
+		msg := fmt.Sprintf("database error fetching product %s: %v", req.Id, err)
 		span.SetStatus(otelcodes.Error, msg)
 		span.AddEvent(msg)
-		return nil, status.Error(codes.NotFound, msg)
+		return nil, status.Errorf(codes.Unavailable, msg)
 	}
 
 	span.AddEvent("Product Found")
