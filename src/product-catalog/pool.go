@@ -69,6 +69,7 @@ func refreshPrices(ctx context.Context, known map[string]int64) error {
 	if err != nil {
 		return fmt.Errorf("refreshPrices: begin: %w", err)
 	}
+	defer tx.Rollback()
 
 	rows, err := tx.QueryContext(ctx, `SELECT id, price_units FROM catalog.products`)
 	if err != nil {
