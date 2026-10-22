@@ -96,6 +96,7 @@ func refreshPrices(ctx context.Context, known map[string]int64) error {
 	}
 
 	if changed == 0 {
+		_ = tx.Rollback()
 		return nil
 	}
 	logger.Info("Catalogue prices changed", slog.Int("products", changed))
