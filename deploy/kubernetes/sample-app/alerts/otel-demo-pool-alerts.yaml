@@ -1,0 +1,61 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: otel-demo-pool-alerts
+  labels:
+    app: otel-demo
+spec:
+  groups:
+    # Early warning on a database connection pool that is filling up.
+    #
+    # A pool that runs out does not degrade gracefully: every query after the
+    # last free connection waits for one, so latency is flat right up to the
+    # moment the pool is full and then every request stalls at once. The
+    # latency and SLO rules therefore fire only after customers are affected.
+    # In-use connections climbing towards the pool size is the signal that
+    # comes first, minutes ahead, and it is what this rule watches.
+    #
+    # Only product-catalog exports pool metrics with a size today
+    # (db_sql_connection_*, from otelsql). Its pool size comes from
+    # DB_MAX_OPEN_CONNS in values.yaml; an unlimited pool reports max_open 0 and
+    # is excluded by the `> 0` filter rather than dividing by zero.
+    - name: otel-demo-db-pool
+      interval: 15s
+      rules:
+        # Half the pool held for 2 minutes AND still climbing. Both halves use
+        # the 2-minute MINIMUM of connections in use, not the raw value: in-use
+        # flips between 0 and 1 on every request, so the raw series' trend is
+        # noise (measured on a test cluster: 0.78/min at rest), while connections
+        # that are held and never returned raise the minimum and bursts do not
+        # (0.06/min at rest). Together the two halves mean the pool is on course
+        # to run out. Written as a level comparison on the utilisation so the
+        # value in the alert is the utilisation itself.
+        - alert: OtelDemoDBConnectionPoolFillingUp
+          expr: |
+            (
+              max by (service_name, k8s_deployment_name, namespace) (
+                min_over_time(db_sql_connection_open{namespace="demo", status="inuse"}[2m])
+              )
+              /
+              max by (service_name, k8s_deployment_name, namespace) (
+                db_sql_connection_max_open{namespace="demo"} > 0
+              )
+            ) > 0.5
+            and on (service_name, k8s_deployment_name, namespace)
+            (
+              max by (service_name, k8s_deployment_name, namespace) (
+                deriv(min_over_time(db_sql_connection_open{namespace="demo", status="inuse"}[2m])[10m:1m])
+              ) * 60 > 0.2
+            )
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: Database connection pool for {{ $labels.service_name }} in demo namespace is filling up
+            description: |
+              {{ $value | humanizePercentage }} of the database connection pool has been in use for at least 2 minutes, and the number of connections held has been rising for 10 minutes.
+              Service: {{ $labels.service_name }}
+              Deployment: {{ $labels.k8s_deployment_name }}

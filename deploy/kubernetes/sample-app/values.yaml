@@ -175,6 +175,13 @@ components:
     envOverrides:
       - name: OTEL_CONFIG_FILE
         value: /otel-config.yml
+      # Cap the DB connection pool (database/sql defaults to no limit). Normal
+      # traffic uses 1-2 connections, so 20 changes nothing day to day, but it
+      # gives the pool a size: db_sql_connection_max_open reports it and
+      # in-use / max becomes a utilisation the pool alert can watch. See
+      # docs/10-connection-leak.md.
+      - name: DB_MAX_OPEN_CONNS
+        value: "20"
     resources:
       requests:
         memory: 32Mi
