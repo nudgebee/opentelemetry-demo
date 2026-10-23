@@ -274,3 +274,8 @@ components:
         memory: 256Mi
       limits:
         memory: 256Mi
+
+  load-generator:
+    resources:
+      limits:
+        memory: 2048Mi
