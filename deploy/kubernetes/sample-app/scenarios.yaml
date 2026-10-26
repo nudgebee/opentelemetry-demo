@@ -272,21 +272,22 @@ scenarios:
   - change: ORDER_REPLAY_WINDOW_SECONDS=120 on the accounting Deployment (a release, reverted by rollout undo)
     service: accounting
     status: works
-    confidence: expected
+    confidence: verified
     walkthrough: docs/11-silent-order-drop.md
     manifests_as: >
       accounting skips any order that repeats a recent order's shipping address,
-      treating it as a replay. About 43% of orders never reach the accounting
+      treating it as a replay. 40-43% of orders never reach the accounting
       database. checkout returns OK, latency is normal, every message is
       consumed, and nothing is logged above Debug.
     detected_as:
-      - { alert: OtelDemoOrdersLostInAccounting, on: accounting, after: "~9 min (expected)" }
+      - { alert: OtelDemoOrdersLostInAccounting, on: accounting, after: "~9 min (measured)" }
       - { alert: OtelDemoOrderLedgerStale, on: accounting, note: "only with ORDER_REPLAY_WINDOW_SECONDS=3600, ~20 min (expected)" }
     objective_check: 'demo_accounting_orders_consumed - recorded - duplicates over 15m is above 0 (exactly 0 at rest)'
     notes: >
       The one scenario where no error, latency or saturation rule fires at all.
-      The drop share is simulated from the load generator's 9 addresses at ~3.4
-      orders a minute, not measured yet. Needs an accounting image built from
+      Measured: rule pending at T+4, firing at T+9; the investigation named the
+      env var and the IsReplay code path at T+14; removing the env var stopped
+      the loss at once and the alert resolved 13 minutes later. Needs an accounting image built from
       this fork; the stock image has neither the env var nor the
       demo_accounting_orders_* metrics. Not self-expiring: undo with kubectl
       rollout undo. Skipped orders are not recovered by the undo. Do not

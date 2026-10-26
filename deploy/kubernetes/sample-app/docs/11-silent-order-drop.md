@@ -2,7 +2,7 @@
 
 **Change:** an accounting release starts skipping "replayed" orders |
 **Service:** `accounting` | **Detected by:** orders placed vs orders recorded,
-and ledger freshness | **Status:** expected, not yet measured
+and ledger freshness | **Status:** measured on a live cluster
 
 Every dashboard stays green. checkout keeps returning OK at normal latency,
 Kafka delivers every message, accounting reads all of them and logs no error,
@@ -23,7 +23,8 @@ is logged at Debug, which is below the service's log level, so the logs show
 nothing at all.
 
 How much is lost depends on the window and on traffic. The load generator
-ships to 9 addresses at about 3.4 orders a minute (simulated, not measured):
+ships to 9 addresses at about 3.4 orders a minute (simulated; the 120 s row
+was measured at 40-43%):
 
 | `ORDER_REPLAY_WINDOW_SECONDS` | Orders missing |
 | --- | --- |
@@ -64,15 +65,21 @@ swung between -270% and +81% with nothing wrong and fired four times; the
 in-stage ratio stayed at exactly 0. Orders lost before accounting are not
 covered; a total stall is, by the freshness rule.
 
-Expected timeline at a 120 s window (from the arithmetic -- replace with
-measured times after the first run):
+Measured on a live cluster at the default load, window 120 s:
 
 | Time | What you see |
 | --- | --- |
-| T+0 | Deployment `accounting` changes (new env var, pod rolls) |
+| T+0 | Deployment `accounting` changes (new env var, pod rolls); the platform records the change |
 | T+0 onwards | checkout OK, latency normal, no errors anywhere |
-| T+3-4 | missing share over 15 minutes crosses 10% |
+| T+2 | lost share over 15 minutes at 3% |
+| T+4 | 11%, rule pending |
 | T+9 | `OtelDemoOrdersLostInAccounting` fires |
+| T+14 | investigation complete, cause named (see below) |
+| T+15 onwards | lost share levels off at 40-43% |
+
+After the env var was removed, orders stopped going missing at once and the
+alert resolved 13 minutes later, once the 15-minute window had aged out the
+lost orders.
 
 ## Prerequisites
 
@@ -141,3 +148,14 @@ on.
   the same address inside the window are dropped as replays.
 - **Action:** roll back the release; then replay the topic for the window it
   ran, since the skipped orders were never written.
+
+On the measured run the investigation said all of this: it named the env var
+and the time it was added, traced it to `IsReplay()` in `Consumer.cs`,
+explained why neither the recorded nor the duplicates counter moved, and
+suggested keying replays on the order ID. Its remediation plan offered setting
+the window to 0 as the immediate fix; approving it ended the loss.
+
+Two things in the quick summary that are not the cause: accounting prints
+`Error: libgssapi_krb5.so.2: cannot open shared object file` on every start
+(present before this scenario), and an earlier alert on the same service can
+be listed as a related candidate.
