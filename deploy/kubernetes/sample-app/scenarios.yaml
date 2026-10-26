@@ -289,7 +289,10 @@ scenarios:
       orders a minute, not measured yet. Needs an accounting image built from
       this fork; the stock image has neither the env var nor the
       demo_accounting_orders_* metrics. Not self-expiring: undo with kubectl
-      rollout undo. Skipped orders are not recovered by the undo.
+      rollout undo. Skipped orders are not recovered by the undo. Do not
+      combine with kafkaQueueProblems: the replay guard also swallows genuine
+      redeliveries before they reach the database, so they count as lost
+      instead of as duplicates and inflate the lost share.
 
   - flag: paymentUnreachable
     variant: "on"
