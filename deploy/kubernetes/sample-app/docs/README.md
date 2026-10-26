@@ -16,6 +16,7 @@ including the scenarios that produce **no** signal and why -- is in
 | [D](./04-payment-failure.md) | Payment failure | `paymentFailure=100%` | `checkout` only | -- |
 | [E](./05-payment-unreachable.md) | Payment unreachable | `paymentUnreachable=on` | `checkout` only | ~2.7 min |
 | [F](./06-undersized-service.md) | Undersized service | none: a CPU limit, then more traffic | `checkout` (Place Order SLO) | ~5 min after traffic rises |
+| [K](./11-silent-order-drop.md) | Orders silently missing | none: an accounting release, `ORDER_REPLAY_WINDOW_SECONDS` | `accounting` (ledger rules) | expected ~9 min |
 
 ## Which one to demo
 
@@ -35,6 +36,11 @@ including the scenarios that produce **no** signal and why -- is in
   setting is changed and traffic grows; nothing is told to fail. The alert
   is on the order SLO and the cause is a setting on another service. Its
   investigation took 24 minutes on our run, not the usual 10.
+
+- **Nothing failing, data wrong:** [K](./11-silent-order-drop.md). Every
+  status code, latency and error rate stays green while orders go missing
+  from the ledger. Only the reconciliation and freshness rules see it, and
+  the investigation has no error to read: it has to find the release.
 
 ## Rules that apply to all of them
 

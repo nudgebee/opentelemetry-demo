@@ -107,6 +107,23 @@ an OOM kill, it goes pending 6.6 days before the kill. It has not yet been
 seen firing live. The rule file documents the three guards that keep a
 straight-line forecast from firing on ordinary wobble.
 
+### Ledger rules: `otel-demo-ledger-alerts.yaml`
+
+Every rule above fires on a service that is failing, slow or short of
+resources. A pipeline that loses data while it stays up, fast and error-free
+trips none of them. These two watch the data in the order pipeline instead:
+
+- `OtelDemoOrdersMissingFromLedger`: more than 10% of the orders checkout
+  placed in the last 15 minutes were not written to the accounting
+  database. The value is the fraction missing.
+- `OtelDemoOrderLedgerStale`: the newest order in the accounting database was
+  placed more than 10 minutes ago while orders are still being placed.
+
+Both need an accounting image built from this fork, which reports the
+`demo_accounting_orders_*` metrics; with the stock image they match nothing
+and stay silent. Exercised by
+[Scenario K](../docs/11-silent-order-drop.md).
+
 ## Gotcha: do not write a quantile rule on the DB duration metric
 
 `db_client_operation_duration_bucket` is exported with bucket boundaries
