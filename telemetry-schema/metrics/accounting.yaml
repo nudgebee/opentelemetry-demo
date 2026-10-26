@@ -1,0 +1,29 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+file_format: definition/2
+metrics:
+  - name: demo.accounting.orders.consumed
+    brief: Order messages read from the orders topic
+    instrument: counter
+    unit: "{order}"
+    stability: development
+    note: Counts every order message accounting reads, including redeliveries
+    annotations:
+      service: accounting
+  - name: demo.accounting.orders.recorded
+    brief: Orders written to the accounting database
+    instrument: counter
+    unit: "{order}"
+    stability: development
+    note: Counts orders whose rows were committed; redelivered orders are not counted again
+    annotations:
+      service: accounting
+  - name: demo.accounting.orders.newest_recorded_time
+    brief: Time the newest order in the accounting database was placed
+    instrument: gauge
+    unit: "s"
+    stability: development
+    note: Unix time, in seconds, taken from the Kafka message of the newest order written. Not reported until the first order is written
+    annotations:
+      service: accounting

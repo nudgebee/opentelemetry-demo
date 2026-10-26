@@ -8,6 +8,7 @@ using Npgsql;
 using Oteldemo;
 using Microsoft.EntityFrameworkCore;
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 
 namespace Accounting;
 
@@ -34,6 +35,12 @@ internal class Consumer : BackgroundService
     private readonly IConsumer<string, byte[]> _consumer;
     private readonly string? _dbConnectionString;
     private static readonly ActivitySource MyActivitySource = new("Accounting.Consumer");
+    private static readonly Meter MyMeter = new("Accounting.Consumer");
+    private static readonly Counter<long> OrdersConsumed = MyMeter.CreateCounter<long>(
+        "demo.accounting.orders.consumed", "{order}", "Order messages read from the orders topic");
+    private static readonly Counter<long> OrdersRecorded = MyMeter.CreateCounter<long>(
+        "demo.accounting.orders.recorded", "{order}", "Orders written to the accounting database");
+    private static long _newestRecordedOrderTime;
 
     public Consumer(ILogger<Consumer> logger)
     {
@@ -48,6 +55,26 @@ internal class Consumer : BackgroundService
         Log.KafkaConnecting(_logger, servers);
 
         _dbConnectionString = Environment.GetEnvironmentVariable("DB_CONNECTION_STRING");
+
+        MyMeter.CreateObservableGauge(
+            "demo.accounting.orders.newest_recorded_time",
+            ObserveNewestRecordedOrderTime,
+            "s",
+            "Time the newest order in the accounting database was placed");
+
+        // Report both counters from start-up, so an order written before the
+        // first export is not lost to rate() and increase().
+        OrdersConsumed.Add(0);
+        OrdersRecorded.Add(0);
+    }
+
+    private static IEnumerable<Measurement<long>> ObserveNewestRecordedOrderTime()
+    {
+        var newest = Interlocked.Read(ref _newestRecordedOrderTime);
+        if (newest > 0)
+        {
+            yield return new Measurement<long>(newest);
+        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -86,6 +113,7 @@ internal class Consumer : BackgroundService
         {
             var order = OrderResult.Parser.ParseFrom(message.Value);
             Log.OrderReceivedMessage(_logger, order);
+            OrdersConsumed.Add(1);
 
             if (_dbConnectionString == null)
             {
@@ -128,6 +156,15 @@ internal class Consumer : BackgroundService
             };
             dbContext.Add(shipping);
             dbContext.SaveChanges();
+
+            OrdersRecorded.Add(1);
+            var placedAt = message.Timestamp.Type == TimestampType.NotAvailable
+                ? DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+                : message.Timestamp.UnixTimestampMs / 1000;
+            if (placedAt > Interlocked.Read(ref _newestRecordedOrderTime))
+            {
+                Interlocked.Exchange(ref _newestRecordedOrderTime, placedAt);
+            }
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         {
