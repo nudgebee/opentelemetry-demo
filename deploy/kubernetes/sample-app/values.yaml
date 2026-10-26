@@ -275,7 +275,16 @@ components:
   # headroom. Both request and limit are set to the same value so the strategic
   # merge patch never leaves a stale request above the limit (an earlier drift
   # in exactly that shape kept this Deployment permanently OutOfSync).
+  #
+  # imageOverride: the fork's accounting reports orders consumed, orders
+  # recorded and the newest recorded order (read by alerts/otel-demo-ledger-
+  # alerts.yaml) and carries the replay guard behind Scenario K. ROLLING TAG --
+  # see the note on product-catalog above.
   accounting:
+    imageOverride:
+      repository: ghcr.io/nudgebee/opentelemetry-demo
+      tag: latest-accounting
+      pullPolicy: Always
     resources:
       requests:
         memory: 256Mi

@@ -32,5 +32,6 @@ RUN chown app "/var/log/opentelemetry/dotnet"
 RUN chown app "/app/instrument.sh"
 USER app
 ENV OTEL_DOTNET_AUTO_TRACES_ADDITIONAL_SOURCES=Accounting.Consumer
+ENV OTEL_DOTNET_AUTO_METRICS_ADDITIONAL_SOURCES=Accounting.Consumer
 
 ENTRYPOINT ["./instrument.sh", "dotnet", "Accounting.dll"]

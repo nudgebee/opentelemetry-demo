@@ -8,6 +8,7 @@ using Npgsql;
 using Oteldemo;
 using Microsoft.EntityFrameworkCore;
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 
 namespace Accounting;
 
@@ -34,6 +35,17 @@ internal class Consumer : BackgroundService
     private readonly IConsumer<string, byte[]> _consumer;
     private readonly string? _dbConnectionString;
     private static readonly ActivitySource MyActivitySource = new("Accounting.Consumer");
+    private static readonly Meter MyMeter = new("Accounting.Consumer");
+    private static readonly Counter<long> OrdersConsumed = MyMeter.CreateCounter<long>(
+        "demo.accounting.orders.consumed", "{order}", "Order messages read from the orders topic");
+    private static readonly Counter<long> OrdersRecorded = MyMeter.CreateCounter<long>(
+        "demo.accounting.orders.recorded", "{order}", "Orders written to the accounting database");
+    private static readonly Counter<long> OrdersDuplicate = MyMeter.CreateCounter<long>(
+        "demo.accounting.orders.duplicates", "{order}", "Redelivered orders already in the accounting database");
+    private static long _newestRecordedOrderTime;
+
+    private readonly TimeSpan _replayWindow;
+    private readonly Dictionary<string, DateTime> _recentOrders = new();
 
     public Consumer(ILogger<Consumer> logger)
     {
@@ -48,6 +60,31 @@ internal class Consumer : BackgroundService
         Log.KafkaConnecting(_logger, servers);
 
         _dbConnectionString = Environment.GetEnvironmentVariable("DB_CONNECTION_STRING");
+
+        _replayWindow = int.TryParse(Environment.GetEnvironmentVariable("ORDER_REPLAY_WINDOW_SECONDS"), out var seconds)
+            ? TimeSpan.FromSeconds(seconds)
+            : TimeSpan.Zero;
+
+        MyMeter.CreateObservableGauge(
+            "demo.accounting.orders.newest_recorded_time",
+            ObserveNewestRecordedOrderTime,
+            "s",
+            "Time the newest order in the accounting database was placed");
+
+        // Report both counters from start-up, so an order written before the
+        // first export is not lost to rate() and increase().
+        OrdersConsumed.Add(0);
+        OrdersRecorded.Add(0);
+        OrdersDuplicate.Add(0);
+    }
+
+    private static IEnumerable<Measurement<long>> ObserveNewestRecordedOrderTime()
+    {
+        var newest = Interlocked.Read(ref _newestRecordedOrderTime);
+        if (newest > 0)
+        {
+            yield return new Measurement<long>(newest);
+        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -86,9 +123,16 @@ internal class Consumer : BackgroundService
         {
             var order = OrderResult.Parser.ParseFrom(message.Value);
             Log.OrderReceivedMessage(_logger, order);
+            OrdersConsumed.Add(1);
 
             if (_dbConnectionString == null)
             {
+                return;
+            }
+
+            if (IsReplay(order))
+            {
+                Log.ReplayedOrderSkipped(_logger, order.OrderId);
                 return;
             }
 
@@ -128,15 +172,56 @@ internal class Consumer : BackgroundService
             };
             dbContext.Add(shipping);
             dbContext.SaveChanges();
+
+            OrdersRecorded.Add(1);
+            RememberOrder(order);
+            var placedAt = message.Timestamp.Type == TimestampType.NotAvailable
+                ? DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+                : message.Timestamp.UnixTimestampMs / 1000;
+            if (placedAt > Interlocked.Read(ref _newestRecordedOrderTime))
+            {
+                Interlocked.Exchange(ref _newestRecordedOrderTime, placedAt);
+            }
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         {
+            OrdersDuplicate.Add(1);
             Log.DuplicateOrderSkipped(_logger);
         }
         catch (Exception ex)
         {
             Log.OrderParsingFailed(_logger, ex);
         }
+    }
+
+    private bool IsReplay(OrderResult order)
+    {
+        if (_replayWindow == TimeSpan.Zero)
+        {
+            return false;
+        }
+
+        var now = DateTime.UtcNow;
+        foreach (var stale in _recentOrders.Where(e => now - e.Value > _replayWindow).Select(e => e.Key).ToList())
+        {
+            _recentOrders.Remove(stale);
+        }
+
+        return _recentOrders.ContainsKey(ReplayKey(order));
+    }
+
+    private void RememberOrder(OrderResult order)
+    {
+        if (_replayWindow != TimeSpan.Zero)
+        {
+            _recentOrders[ReplayKey(order)] = DateTime.UtcNow;
+        }
+    }
+
+    private static string ReplayKey(OrderResult order)
+    {
+        var address = order.ShippingAddress;
+        return $"{address.StreetAddress}|{address.City}|{address.ZipCode}|{address.Country}";
     }
 
     private static IConsumer<string, byte[]> BuildConsumer(string servers)
