@@ -40,6 +40,8 @@ internal class Consumer : BackgroundService
         "demo.accounting.orders.consumed", "{order}", "Order messages read from the orders topic");
     private static readonly Counter<long> OrdersRecorded = MyMeter.CreateCounter<long>(
         "demo.accounting.orders.recorded", "{order}", "Orders written to the accounting database");
+    private static readonly Counter<long> OrdersDuplicate = MyMeter.CreateCounter<long>(
+        "demo.accounting.orders.duplicates", "{order}", "Redelivered orders already in the accounting database");
     private static long _newestRecordedOrderTime;
 
     private readonly TimeSpan _replayWindow;
@@ -73,6 +75,7 @@ internal class Consumer : BackgroundService
         // first export is not lost to rate() and increase().
         OrdersConsumed.Add(0);
         OrdersRecorded.Add(0);
+        OrdersDuplicate.Add(0);
     }
 
     private static IEnumerable<Measurement<long>> ObserveNewestRecordedOrderTime()
@@ -182,6 +185,7 @@ internal class Consumer : BackgroundService
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         {
+            OrdersDuplicate.Add(1);
             Log.DuplicateOrderSkipped(_logger);
         }
         catch (Exception ex)

@@ -19,6 +19,14 @@ metrics:
     note: Counts orders whose rows were committed; redelivered orders are not counted again
     annotations:
       service: accounting
+  - name: demo.accounting.orders.duplicates
+    brief: Redelivered orders already in the accounting database
+    instrument: counter
+    unit: "{order}"
+    stability: development
+    note: Counts orders skipped because their order ID is already in the database. consumed minus recorded minus duplicates is the number of orders lost inside accounting
+    annotations:
+      service: accounting
   - name: demo.accounting.orders.newest_recorded_time
     brief: Time the newest order in the accounting database was placed
     instrument: gauge
