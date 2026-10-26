@@ -42,6 +42,9 @@ internal class Consumer : BackgroundService
         "demo.accounting.orders.recorded", "{order}", "Orders written to the accounting database");
     private static long _newestRecordedOrderTime;
 
+    private readonly TimeSpan _replayWindow;
+    private readonly Dictionary<string, DateTime> _recentOrders = new();
+
     public Consumer(ILogger<Consumer> logger)
     {
         _logger = logger;
@@ -55,6 +58,10 @@ internal class Consumer : BackgroundService
         Log.KafkaConnecting(_logger, servers);
 
         _dbConnectionString = Environment.GetEnvironmentVariable("DB_CONNECTION_STRING");
+
+        _replayWindow = int.TryParse(Environment.GetEnvironmentVariable("ORDER_REPLAY_WINDOW_SECONDS"), out var seconds)
+            ? TimeSpan.FromSeconds(seconds)
+            : TimeSpan.Zero;
 
         MyMeter.CreateObservableGauge(
             "demo.accounting.orders.newest_recorded_time",
@@ -120,6 +127,12 @@ internal class Consumer : BackgroundService
                 return;
             }
 
+            if (IsReplay(order))
+            {
+                Log.ReplayedOrderSkipped(_logger, order.OrderId);
+                return;
+            }
+
             using var dbContext = new DBContext();
             var orderEntity = new OrderEntity
             {
@@ -158,6 +171,7 @@ internal class Consumer : BackgroundService
             dbContext.SaveChanges();
 
             OrdersRecorded.Add(1);
+            RememberOrder(order);
             var placedAt = message.Timestamp.Type == TimestampType.NotAvailable
                 ? DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                 : message.Timestamp.UnixTimestampMs / 1000;
@@ -174,6 +188,36 @@ internal class Consumer : BackgroundService
         {
             Log.OrderParsingFailed(_logger, ex);
         }
+    }
+
+    private bool IsReplay(OrderResult order)
+    {
+        if (_replayWindow == TimeSpan.Zero)
+        {
+            return false;
+        }
+
+        var now = DateTime.UtcNow;
+        foreach (var stale in _recentOrders.Where(e => now - e.Value > _replayWindow).Select(e => e.Key).ToList())
+        {
+            _recentOrders.Remove(stale);
+        }
+
+        return _recentOrders.ContainsKey(ReplayKey(order));
+    }
+
+    private void RememberOrder(OrderResult order)
+    {
+        if (_replayWindow != TimeSpan.Zero)
+        {
+            _recentOrders[ReplayKey(order)] = DateTime.UtcNow;
+        }
+    }
+
+    private static string ReplayKey(OrderResult order)
+    {
+        var address = order.ShippingAddress;
+        return $"{address.StreetAddress}|{address.City}|{address.ZipCode}|{address.Country}";
     }
 
     private static IConsumer<string, byte[]> BuildConsumer(string servers)
