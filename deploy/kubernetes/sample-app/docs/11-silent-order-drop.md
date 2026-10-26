@@ -40,7 +40,7 @@ Two rules in
 [`alerts/otel-demo-ledger-alerts.yaml`](../alerts/otel-demo-ledger-alerts.yaml),
 both on `accounting`, the stage whose output is short:
 
-- **`OtelDemoOrdersMissingFromLedger`**: more than 10% of the orders
+- **`OtelDemoOrdersLostInAccounting`**: more than 10% of the orders
   accounting read in the last 15 minutes were neither written nor skipped as
   duplicates. The value is the fraction lost.
 - **`OtelDemoOrderLedgerStale`**: the newest order in the ledger was placed
@@ -72,7 +72,7 @@ measured times after the first run):
 | T+0 | Deployment `accounting` changes (new env var, pod rolls) |
 | T+0 onwards | checkout OK, latency normal, no errors anywhere |
 | T+3-4 | missing share over 15 minutes crosses 10% |
-| T+9 | `OtelDemoOrdersMissingFromLedger` fires |
+| T+9 | `OtelDemoOrdersLostInAccounting` fires |
 
 ## Prerequisites
 

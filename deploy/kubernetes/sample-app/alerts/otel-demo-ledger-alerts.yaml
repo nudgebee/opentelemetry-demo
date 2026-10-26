@@ -55,7 +55,7 @@ spec:
         # were neither written nor skipped as duplicates. 15 minutes holds about
         # 50 orders at the default load; the >= 10 guard keeps an idle demo
         # from firing on a handful. The value is the fraction lost.
-        - alert: OtelDemoOrdersMissingFromLedger
+        - alert: OtelDemoOrdersLostInAccounting
           expr: |
             (
               (
