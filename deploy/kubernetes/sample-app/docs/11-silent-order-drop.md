@@ -40,25 +40,29 @@ Two rules in
 [`alerts/otel-demo-ledger-alerts.yaml`](../alerts/otel-demo-ledger-alerts.yaml),
 both on `accounting`, the stage whose output is short:
 
-- **`OtelDemoOrdersMissingFromLedger`**: more than 10% of the orders checkout
-  placed in the last 15 minutes are not in the ledger. The value is the
-  fraction missing.
+- **`OtelDemoOrdersMissingFromLedger`**: more than 10% of the orders
+  accounting read in the last 15 minutes were neither written nor skipped as
+  duplicates. The value is the fraction lost.
 - **`OtelDemoOrderLedgerStale`**: the newest order in the ledger was placed
   more than 10 minutes ago while checkout is still placing orders.
 
-They read three accounting metrics added for this scenario, plus checkout's
-existing PlaceOrder count:
+They read four accounting metrics added for this scenario:
 
-| Metric | Stage |
+| Metric | Meaning |
 | --- | --- |
-| `rpc_server_call_duration_count{service_name="checkout", rpc_method=".../PlaceOrder", rpc_response_status_code="OK"}` | orders placed (in) |
-| `demo_accounting_orders_consumed` | orders read from Kafka by accounting |
+| `demo_accounting_orders_consumed` | orders read from Kafka (in) |
 | `demo_accounting_orders_recorded` | orders written to the database (out) |
+| `demo_accounting_orders_duplicates` | redeliveries of orders already written (knowingly discarded) |
 | `demo_accounting_orders_newest_recorded_time` | placement time of the newest order written |
 
-Consumed against recorded tells you which stage loses the orders: here every
-message is consumed and fewer are recorded, so the loss is inside accounting,
-not in Kafka.
+Consumed minus recorded minus duplicates is what accounting lost without a
+trace. The check is per stage on purpose. Comparing checkout's PlaceOrder
+count with the ledger end to end looks more natural, but the two counters
+come from different processes, so a gap in metric ingestion lands on one and
+not the other. On a cluster whose collector was shedding load, that ratio
+swung between -270% and +81% with nothing wrong and fired four times; the
+in-stage ratio stayed at exactly 0. Orders lost before accounting are not
+covered; a total stall is, by the freshness rule.
 
 Expected timeline at a 120 s window (from the arithmetic -- replace with
 measured times after the first run):
@@ -81,12 +85,12 @@ measured times after the first run):
   kubectl -n <rules-namespace> apply -f alerts/otel-demo-ledger-alerts.yaml
   ```
 
-- At rest, the missing share stays near 0:
+- At rest, the lost share is exactly 0:
 
   ```promql
-  1 - sum(increase(demo_accounting_orders_recorded{namespace="demo"}[15m]))
-    / sum(increase(rpc_server_call_duration_count{namespace="demo", service_name="checkout",
-        rpc_method="oteldemo.CheckoutService/PlaceOrder", rpc_response_status_code="OK"}[15m]))
+  sum(increase(demo_accounting_orders_consumed{namespace="demo"}[15m]))
+    - sum(increase(demo_accounting_orders_recorded{namespace="demo"}[15m]))
+    - sum(increase(demo_accounting_orders_duplicates{namespace="demo"}[15m]))
   ```
 
 ## Run it
@@ -106,8 +110,8 @@ kubectl -n demo exec deploy/astronomy-db -- \
   psql -U astronomy_user -d astronomy_db -c 'select count(*) from accounting."order"'
 ```
 
-Run it twice a few minutes apart and compare the growth with the number of
-successful PlaceOrder calls over the same minutes.
+Run it twice a few minutes apart and compare the growth with
+`demo_accounting_orders_consumed` over the same minutes.
 
 For the freshness rule, use a window long enough that every address is
 already in it: `ORDER_REPLAY_WINDOW_SECONDS=3600`. After roughly the first 25
@@ -132,7 +136,7 @@ on.
   (the new env var is in the diff).
 - **Is it isolated:** checkout, Kafka and the database are healthy; every
   message is consumed, fewer are written. No errors in accounting's logs.
-- **Getting worse:** the share missing, and how many orders that is so far.
+- **Getting worse:** the share lost, and how many orders that is so far.
 - **Cause:** the replay guard keys on shipping address, so distinct orders to
   the same address inside the window are dropped as replays.
 - **Action:** roll back the release; then replay the topic for the window it

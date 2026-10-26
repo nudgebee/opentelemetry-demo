@@ -282,7 +282,7 @@ scenarios:
     detected_as:
       - { alert: OtelDemoOrdersMissingFromLedger, on: accounting, after: "~9 min (expected)" }
       - { alert: OtelDemoOrderLedgerStale, on: accounting, note: "only with ORDER_REPLAY_WINDOW_SECONDS=3600, ~20 min (expected)" }
-    objective_check: 'select count(*) from accounting."order" grows slower than successful PlaceOrder calls'
+    objective_check: 'demo_accounting_orders_consumed - recorded - duplicates over 15m is above 0 (exactly 0 at rest)'
     notes: >
       The one scenario where no error, latency or saturation rule fires at all.
       The drop share is simulated from the load generator's 9 addresses at ~3.4

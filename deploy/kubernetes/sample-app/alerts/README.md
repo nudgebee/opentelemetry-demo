@@ -113,9 +113,12 @@ Every rule above fires on a service that is failing, slow or short of
 resources. A pipeline that loses data while it stays up, fast and error-free
 trips none of them. These two watch the data in the order pipeline instead:
 
-- `OtelDemoOrdersMissingFromLedger`: more than 10% of the orders checkout
-  placed in the last 15 minutes were not written to the accounting
-  database. The value is the fraction missing.
+- `OtelDemoOrdersMissingFromLedger`: more than 10% of the orders accounting
+  read in the last 15 minutes were neither written to its database nor
+  skipped as duplicates. The value is the fraction lost. It is a per-stage
+  check rather than checkout vs ledger because counters from two processes
+  drift apart whenever metric ingestion has gaps; the rule file has the
+  numbers.
 - `OtelDemoOrderLedgerStale`: the newest order in the accounting database was
   placed more than 10 minutes ago while orders are still being placed.
 
