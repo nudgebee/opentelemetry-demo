@@ -310,6 +310,29 @@ scenarios:
       first, because a preceding paymentFailure run keeps the same checkout alert
       firing continuously and would otherwise have been miscredited to this flag.
 
+  - change: PRICE_REFRESH_INTERVAL=60s on the product-catalog Deployment (a release, reverted by removing the env var)
+    setup: product-catalog DB pool capped at 20 (DB_MAX_OPEN_CONNS in values.yaml)
+    service: product-catalog
+    status: works
+    confidence: verified
+    walkthrough: docs/10-connection-leak.md
+    manifests_as: >
+      A background price refresh holds one DB connection a minute and never
+      returns it. Connections in use climb in a straight line from 1-2 to the
+      pool size of 20 while latency stays flat, then every product query waits
+      for a connection.
+    detected_as:
+      - { alert: OtelDemoDBConnectionPoolFillingUp, on: product-catalog, after: "~12 min (measured)" }
+      - { alert: OtelDemoDBConnectionPoolExhausted, on: product-catalog, after: "~23 min (measured), customer impact starts here" }
+    objective_check: 'min_over_time(db_sql_connection_open{service_name="product-catalog", status="inuse"}[2m]) climbing ~1 a minute'
+    notes: >
+      Measured: warning at T+12 with latency normal, investigation naming the
+      env var and the refreshPrices code path at T+16.5, pool full at T+23.
+      Needs a product-catalog image built from this fork with
+      src/product-catalog/pool.go; the stock image ignores both env vars. Not
+      self-expiring: undo by removing the env var, not rollout undo (an
+      identical earlier revision can bring the leak back).
+
   - flag: adManualGc
     variant: "on"
     service: ad

@@ -16,6 +16,7 @@ including the scenarios that produce **no** signal and why -- is in
 | [D](./04-payment-failure.md) | Payment failure | `paymentFailure=100%` | `checkout` only | -- |
 | [E](./05-payment-unreachable.md) | Payment unreachable | `paymentUnreachable=on` | `checkout` only | ~2.7 min |
 | [F](./06-undersized-service.md) | Undersized service | none: a CPU limit, then more traffic | `checkout` (Place Order SLO) | ~5 min after traffic rises |
+| [J](./10-connection-leak.md) | Connection leak after a release | none: a Deployment env change | `product-catalog` (pool), then `checkout` | ~12 min warning, ~23 min pool full |
 | [K](./11-silent-order-drop.md) | Orders silently missing | none: an accounting release, `ORDER_REPLAY_WINDOW_SECONDS` | `accounting` (ledger rules) | ~9 min |
 
 ## Which one to demo
