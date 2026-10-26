@@ -39,6 +39,12 @@ namespace Accounting
         public static partial void DuplicateOrderSkipped(ILogger logger);
 
         [LoggerMessage(
+            Level = LogLevel.Debug,
+            EventName = "accounting.order.replay_skipped",
+            Message = "Order {orderId} matches a recent order, skipping.")]
+        public static partial void ReplayedOrderSkipped(ILogger logger, string orderId);
+
+        [LoggerMessage(
             Level = LogLevel.Error,
             EventName = "accounting.order.parsing_failed",
             Message = "Order parsing failed:")]

@@ -1,0 +1,123 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Correctness rules for the order pipeline: checkout -> Kafka -> accounting ->
+# the accounting database.
+#
+# Every other rule file alerts on a service that is failing, slow or out of
+# resources. None of them can see a pipeline that is up, fast and error-free
+# while it loses data: checkout returns OK, Kafka delivers, accounting reads
+# every message and logs nothing, and the orders simply never reach the
+# ledger. These two rules watch the data instead of the service.
+#
+#   reconciliation   orders accounting received vs orders it wrote or
+#                    knowingly discarded. Silent drops show up as a gap, not
+#                    an exception.
+#   freshness        how long ago the newest order in the ledger was placed.
+#                    A stalled consumer throws no errors either.
+#
+# Reconciliation is per stage, inside accounting: every order message it reads
+# (demo.accounting.orders.consumed) must end up either written
+# (demo.accounting.orders.recorded) or skipped as a redelivery of an order
+# already in the database (demo.accounting.orders.duplicates). Whatever is
+# left was lost without a trace. Redeliveries, e.g. under the
+# kafkaQueueProblems flag, therefore do not open a gap.
+#
+# Why not compare checkout's PlaceOrder count with the ledger end to end: the
+# two counters come from different processes and reach the metrics store
+# separately, so any gap in ingestion hits one and not the other. Measured on
+# a test cluster whose collector was shedding load: the end-to-end ratio
+# swung between -270% and +81% over a few hours with nothing wrong, and fired
+# four times, while the in-stage ratio stayed at exactly 0 -- its three
+# counters are exported together, so a gap removes all of them at once.
+# Orders lost before accounting (in checkout's publish or in Kafka) are not
+# covered by this rule; the freshness rule catches a total stall.
+#
+# Both rules attach to accounting, the stage whose output is short or stale.
+#
+# Metric names are matched with and without the unit suffix that Prometheus'
+# OTLP receiver appends (_total, _seconds); VictoriaMetrics leaves it off.
+#
+# NOTE ON NAMESPACES -- `namespace="demo"` inside each expression is where the
+# demo runs, not where this object lives. apply-alerts.sh rewrites it.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: otel-demo-ledger-alerts
+  labels:
+    app: otel-demo
+spec:
+  groups:
+    - name: otel-demo-order-ledger
+      interval: 30s
+      rules:
+        # More than 10% of the orders accounting read in the last 15 minutes
+        # were neither written nor skipped as duplicates. 15 minutes holds about
+        # 50 orders at the default load; the >= 10 guard keeps an idle demo
+        # from firing on a handful. The value is the fraction lost.
+        - alert: OtelDemoOrdersLostInAccounting
+          expr: |
+            (
+              (
+                sum by (namespace, service_name, k8s_deployment_name) (
+                  increase({__name__=~"demo_accounting_orders_consumed(_total)?", namespace="demo"}[15m])
+                )
+                - sum by (namespace, service_name, k8s_deployment_name) (
+                  increase({__name__=~"demo_accounting_orders_recorded(_total)?", namespace="demo"}[15m])
+                )
+                - sum by (namespace, service_name, k8s_deployment_name) (
+                  increase({__name__=~"demo_accounting_orders_duplicates(_total)?", namespace="demo"}[15m])
+                )
+              )
+              / sum by (namespace, service_name, k8s_deployment_name) (
+                increase({__name__=~"demo_accounting_orders_consumed(_total)?", namespace="demo"}[15m])
+              )
+            ) > 0.1
+            and
+            sum by (namespace, service_name, k8s_deployment_name) (
+              increase({__name__=~"demo_accounting_orders_consumed(_total)?", namespace="demo"}[15m])
+            ) >= 10
+          for: 5m
+          labels:
+            # critical: orders are being lost now, and critical alerts arrive
+            # as high priority, which starts an investigation on their own.
+            severity: critical
+          annotations:
+            summary: Orders received by accounting in demo namespace are missing from the ledger
+            description: |
+              {{ $value | humanizePercentage }} of the orders accounting received in the last 15 minutes were neither written to the accounting database nor skipped as duplicates.
+              Service: {{ $labels.service_name }}
+              Deployment: {{ $labels.k8s_deployment_name }}
+
+        # The newest order in the ledger was placed more than 10 minutes ago
+        # while checkout is still placing orders. At the default load an order
+        # arrives every 15-20 seconds, so 10 minutes is about 35 missed orders.
+        # Not reported until accounting has written its first order after a
+        # restart, so a consumer that is stalled from the moment it starts is
+        # not covered.
+        - alert: OtelDemoOrderLedgerStale
+          expr: |
+            (
+              time()
+              - max by (namespace, service_name, k8s_deployment_name) (
+                {__name__=~"demo_accounting_orders_newest_recorded_time(_seconds)?", namespace="demo"}
+              )
+            ) > 600
+            and on (namespace)
+            sum by (namespace) (
+              increase({
+                __name__=~"rpc_server_call_duration(_seconds)?_count",
+                namespace="demo", service_name="checkout",
+                rpc_method="oteldemo.CheckoutService/PlaceOrder",
+                rpc_response_status_code="OK"
+              }[10m])
+            ) > 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: Accounting ledger in demo namespace has stopped receiving orders
+            description: |
+              The newest order in the accounting database was placed {{ $value | humanizeDuration }} ago, while checkout is still placing orders.
+              Service: {{ $labels.service_name }}
+              Deployment: {{ $labels.k8s_deployment_name }}
