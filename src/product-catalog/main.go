@@ -494,7 +494,7 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 		attribute.String("demo.product.name", found.Name),
 	)
 
-	if priceHistoryEnabled {
+	if priceHistoryEnabled && orderTimeLookup(ctx) {
 		if changes, err := priceChangeCount(ctx, req.Id); err != nil {
 			logger.Warn("Price history lookup failed", slog.String("demo.product.id", req.Id), slog.Any("error", err))
 		} else {

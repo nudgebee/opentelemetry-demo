@@ -9,7 +9,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
+
+	"google.golang.org/grpc/metadata"
 )
 
 // priceHistoryEnabled is set once at startup by startPriceHistory, before the
@@ -18,9 +21,9 @@ var priceHistoryEnabled bool
 
 // startPriceHistory records every product's price every
 // PRICE_HISTORY_SAMPLE_INTERVAL (a Go duration such as "3s"; unset disables it)
-// so GetProduct can report how often a product's price has changed. The
-// history table lives in its own schema, created on first use. The goroutine
-// stops when ctx is cancelled.
+// so GetProduct can report, when an order is placed, how often a product's
+// price has changed. The history table lives in its own schema, created on
+// first use. The goroutine stops when ctx is cancelled.
 func startPriceHistory(ctx context.Context) {
 	v := os.Getenv("PRICE_HISTORY_SAMPLE_INTERVAL")
 	if v == "" {
@@ -61,6 +64,24 @@ func startPriceHistory(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+// orderTimeLookup reports whether a GetProduct call comes from the order
+// service. The price check is shown when an order is placed, not while the
+// customer browses, so storefront lookups skip it. In this demo the order
+// service (checkout) is the catalogue's only Go gRPC client; the storefront
+// calls it through grpc-js.
+func orderTimeLookup(ctx context.Context) bool {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return false
+	}
+	for _, ua := range md.Get("user-agent") {
+		if strings.Contains(ua, "grpc-go/") {
+			return true
+		}
+	}
+	return false
 }
 
 // priceChangeCount returns how many times a product's price differed from the
