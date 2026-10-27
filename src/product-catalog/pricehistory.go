@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
@@ -64,9 +65,23 @@ func startPriceHistory(ctx context.Context) {
 
 // priceChangeCount returns how many times a product's price differed from the
 // sample before it.
+//
+// JIT is turned off for this query: once the history is a few thousand rows the
+// planner JIT-compiles it on every call, and each compile keeps memory in the
+// database backend until the connection closes. On a small database container
+// that ends in an OOM kill within minutes, not in a slow lookup.
 func priceChangeCount(ctx context.Context, productID string) (int64, error) {
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return 0, fmt.Errorf("priceChangeCount: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `SET LOCAL jit = off`); err != nil {
+		return 0, fmt.Errorf("priceChangeCount: %w", err)
+	}
+
 	var n int64
-	err := db.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 		SELECT count(*)
 		FROM pricing.price_history h
 		WHERE h.product_id = $1
