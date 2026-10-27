@@ -97,3 +97,4 @@ this demo, upstream's [fork guidance](https://opentelemetry.io/docs/demo/forking
 is the right starting point -- not this repo.
 
 [upstream]: https://github.com/open-telemetry/opentelemetry-demo
+<!-- e2e #42428 -->
