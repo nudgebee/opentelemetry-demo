@@ -13,8 +13,7 @@ RUN go mod download
 
 COPY ./src/product-catalog/genproto/oteldemo/ genproto/oteldemo/
 COPY ./src/product-catalog/flags/ flags/
-COPY ./src/product-catalog/main.go main.go
-COPY ./src/product-catalog/pool.go pool.go
+COPY ./src/product-catalog/*.go ./
 
 RUN CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build -ldflags "-s -w" -o product-catalog .
 

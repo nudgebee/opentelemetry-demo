@@ -203,6 +203,7 @@ func main() {
 	// stops on shutdown) so the query path never evaluates flagd per request.
 	startPostgresFlagWatcher(ctx)
 	startPriceRefresher(ctx)
+	startPriceHistory(ctx)
 
 	go func() {
 		if err := srv.Serve(ln); err != nil {
@@ -492,6 +493,14 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 		attribute.String("demo.product.id", req.Id),
 		attribute.String("demo.product.name", found.Name),
 	)
+
+	if priceHistoryEnabled {
+		if changes, err := priceChangeCount(ctx, req.Id); err != nil {
+			logger.Warn("Price history lookup failed", slog.String("demo.product.id", req.Id), slog.Any("error", err))
+		} else {
+			span.SetAttributes(attribute.Int64("demo.product.price_changes", changes))
+		}
+	}
 
 	logger.LogAttrs(
 		ctx,
