@@ -283,3 +283,12 @@ components:
         memory: 256Mi
       limits:
         memory: 256Mi
+
+  # load-generator — raise memory requests and limits to 2Gi to prevent recurring
+  # OOMKills from combined k6 HTTP load testing and headless Chromium automation.
+  load-generator:
+    resources:
+      requests:
+        memory: 2Gi
+      limits:
+        memory: 2Gi
