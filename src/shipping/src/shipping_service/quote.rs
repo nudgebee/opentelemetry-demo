@@ -10,7 +10,7 @@ use std::{collections::HashMap, env};
 
 use anyhow::{Context, Result};
 use opentelemetry::{trace::get_active_span, KeyValue};
-use tracing::info;
+use tracing::{info, warn};
 
 use super::shipping_types::Quote;
 
@@ -20,12 +20,41 @@ static ITEMS_SHIPPED_COUNTER: LazyLock<Counter<u64>> = LazyLock::new(|| {
         .build()
 });
 
+const COST_PER_ITEM: f64 = 8.99;
+
+fn fallback_quote(count: u32) -> f64 {
+    (count as f64) * COST_PER_ITEM
+}
+
 pub async fn create_quote_from_count(count: u32) -> Result<Quote, tonic::Status> {
-    let f = match request_quote(count).await {
-        Ok(float) => float,
-        Err(err) => {
-            let msg = format!("{}", err);
-            return Err(tonic::Status::unknown(msg));
+    let mut quote_res = None;
+    let max_retries = 3;
+
+    for attempt in 1..=max_retries {
+        match request_quote(count).await {
+            Ok(float) => {
+                quote_res = Some(float);
+                break;
+            }
+            Err(err) => {
+                warn!(
+                    name: "shipping.quote.retry",
+                    attempt = attempt,
+                    error = %err,
+                    "Failed to request quote from quote service, retrying"
+                );
+            }
+        }
+    }
+
+    let f = match quote_res {
+        Some(float) => float,
+        None => {
+            warn!(
+                name: "shipping.quote.fallback",
+                "Quote service unavailable after retries, using fallback calculation"
+            );
+            fallback_quote(count)
         }
     };
 
