@@ -283,3 +283,11 @@ components:
         memory: 256Mi
       limits:
         memory: 256Mi
+
+  # load-generator — k6 with K6_BROWSER_ENABLED=true runs headless Chromium which
+  # reaches ~1020.4 MiB and gets OOMKilled against the default 1Gi limit.
+  # Raising the limit to 2Gi provides headroom to sustain browser load without OOMKills.
+  load-generator:
+    resources:
+      limits:
+        memory: 2Gi
