@@ -283,3 +283,10 @@ components:
         memory: 256Mi
       limits:
         memory: 256Mi
+
+  # load-generator — provide headroom for concurrent k6 virtual users and
+  # headless Chromium browser automation without triggering cgroup OOM.
+  load-generator:
+    resources:
+      limits:
+        memory: 3Gi
