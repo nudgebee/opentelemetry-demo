@@ -67,6 +67,8 @@ spec:
       # only costs query time.
       interval: 5m
       rules:
+        # fraud-detection is left out: its memory scenario is forecast by NudgeBee's
+        # memory_saturation SLO, and this rule would page for the same climb.
         - alert: OtelDemoMemoryLimitForecast
           expr: |
             label_replace(
@@ -80,13 +82,13 @@ spec:
                         )
                         -
                         max by (namespace, pod, container) (
-                          container_memory_working_set_bytes{namespace="demo", container!="", container!="POD"}
+                          container_memory_working_set_bytes{namespace="demo", container!="", container!="POD", container!="fraud-detection"}
                         )
                       )
                       /
                       (
                         max by (namespace, pod, container) (
-                          deriv(container_memory_working_set_bytes{namespace="demo", container!="", container!="POD"}[3d])
+                          deriv(container_memory_working_set_bytes{namespace="demo", container!="", container!="POD", container!="fraud-detection"}[3d])
                         ) * 86400
                       )
                     ) > 0
@@ -95,7 +97,7 @@ spec:
                 and on (namespace, pod, container)
                 (
                   max by (namespace, pod, container) (
-                    deriv(container_memory_working_set_bytes{namespace="demo", container!="", container!="POD"}[3d])
+                    deriv(container_memory_working_set_bytes{namespace="demo", container!="", container!="POD", container!="fraud-detection"}[3d])
                   ) * 3 * 86400
                   >
                   0.05 * max by (namespace, pod, container) (
@@ -105,7 +107,7 @@ spec:
                 and on (namespace, pod, container)
                 (
                   max by (namespace, pod, container) (
-                    predict_linear(container_memory_working_set_bytes{namespace="demo", container!="", container!="POD"}[1d], 7 * 86400)
+                    predict_linear(container_memory_working_set_bytes{namespace="demo", container!="", container!="POD", container!="fraud-detection"}[1d], 7 * 86400)
                   )
                   >
                   0.9 * max by (namespace, pod, container) (

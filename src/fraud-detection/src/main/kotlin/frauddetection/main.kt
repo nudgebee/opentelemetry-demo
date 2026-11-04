@@ -12,8 +12,11 @@ import org.apache.kafka.common.serialization.StringDeserializer
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 import oteldemo.Demo.*
+import java.time.Duration
 import java.time.Duration.ofMillis
+import java.time.Instant
 import java.util.*
+import kotlin.math.sqrt
 import kotlin.system.exitProcess
 import dev.openfeature.contrib.providers.flagd.FlagdOptions
 import dev.openfeature.contrib.providers.flagd.FlagdProvider
@@ -27,6 +30,17 @@ val topic: String = System.getenv("KAFKA_TOPIC") ?: "orders"
 const val groupID = "fraud-detection"
 
 private val logger: Logger = LogManager.getLogger(groupID)
+
+// Velocity check: each order is scored against the feature vectors of past orders,
+// so a burst of near-identical orders (card testing) stands out. History older
+// than FRAUD_HISTORY_WINDOW (ISO-8601 duration, e.g. PT24H) is dropped; when it
+// is unset every order is kept.
+const val featureDims = 512
+val historyWindow: Duration? = System.getenv("FRAUD_HISTORY_WINDOW")?.takeIf { it.isNotBlank() }?.let(Duration::parse)
+
+class PastOrder(val at: Instant, val features: DoubleArray)
+
+val history = java.util.ArrayDeque<PastOrder>()
 
 fun main() {
     val options = FlagdOptions.builder()
@@ -68,11 +82,43 @@ fun main() {
                         Thread.sleep(1000)
                     }
                     val orders = OrderResult.parseFrom(record.value())
-                    logger.info("Consumed record with orderId: ${orders.orderId}, and updated total count to: $newCount")
+                    val similarity = maxSimilarity(features(orders), Instant.now())
+                    logger.info("Consumed record with orderId: ${orders.orderId}, and updated total count to: $newCount, max similarity to past orders: ${"%.3f".format(similarity)} over ${history.size} orders")
                     newCount
                 }
         }
     }
+}
+
+fun features(order: OrderResult): DoubleArray {
+    val v = DoubleArray(featureDims)
+    fun add(key: String, weight: Double) {
+        val h = key.hashCode()
+        v[Math.floorMod(h, featureDims)] += if (h and 1 == 0) weight else -weight
+    }
+    order.itemsList.forEach { add("item:${it.item.productId}", it.item.quantity.toDouble()) }
+    with(order.shippingAddress) {
+        add("street:$streetAddress", 1.0)
+        add("city:$city", 1.0)
+        add("zip:$zipCode", 1.0)
+        add("country:$country", 1.0)
+    }
+    add("shipping:${order.shippingCost.units / 10}", 1.0)
+    val norm = sqrt(v.sumOf { it * it })
+    if (norm > 0) for (i in v.indices) v[i] /= norm
+    return v
+}
+
+fun maxSimilarity(v: DoubleArray, now: Instant): Double {
+    historyWindow?.let { w -> while (history.isNotEmpty() && history.peekFirst().at < now - w) history.removeFirst() }
+    var best = 0.0
+    for (past in history) {
+        var dot = 0.0
+        for (i in 0 until featureDims) dot += v[i] * past.features[i]
+        if (dot > best) best = dot
+    }
+    history.addLast(PastOrder(now, v))
+    return best
 }
 
 /**
