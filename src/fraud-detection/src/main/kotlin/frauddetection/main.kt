@@ -35,12 +35,12 @@ private val logger: Logger = LogManager.getLogger(groupID)
 // so a burst of near-identical orders (card testing) stands out. History older
 // than FRAUD_HISTORY_WINDOW (ISO-8601 duration, e.g. PT24H) is dropped; when it
 // is unset every order is kept.
-const val featureDims = 512
-val historyWindow: Duration? = System.getenv("FRAUD_HISTORY_WINDOW")?.takeIf { it.isNotBlank() }?.let(Duration::parse)
+private const val featureDims = 512
+private val historyWindow: Duration? = System.getenv("FRAUD_HISTORY_WINDOW")?.takeIf { it.isNotBlank() }?.let(Duration::parse)
 
-class PastOrder(val at: Instant, val features: DoubleArray)
+private class PastOrder(val at: Instant, val features: DoubleArray)
 
-val history = java.util.ArrayDeque<PastOrder>()
+private val history = java.util.ArrayDeque<PastOrder>()
 
 fun main() {
     val options = FlagdOptions.builder()
@@ -90,7 +90,7 @@ fun main() {
     }
 }
 
-fun features(order: OrderResult): DoubleArray {
+private fun features(order: OrderResult): DoubleArray {
     val v = DoubleArray(featureDims)
     fun add(key: String, weight: Double) {
         val h = key.hashCode()
@@ -109,7 +109,7 @@ fun features(order: OrderResult): DoubleArray {
     return v
 }
 
-fun maxSimilarity(v: DoubleArray, now: Instant): Double {
+private fun maxSimilarity(v: DoubleArray, now: Instant): Double {
     historyWindow?.let { w -> while (history.isNotEmpty() && history.peekFirst().at < now - w) history.removeFirst() }
     var best = 0.0
     for (past in history) {
