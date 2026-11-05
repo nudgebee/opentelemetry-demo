@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-use actix_web::{web, App, HttpResponse, HttpServer};
+use actix_web::{middleware::Logger, web, App, HttpResponse, HttpServer};
 use open_feature::provider::FeatureProvider;
 use open_feature_flagd::{FlagdOptions, FlagdProvider};
 use opentelemetry_instrumentation_actix_web::{RequestMetrics, RequestTracing};
@@ -59,6 +59,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(flag_provider.clone())
+            .wrap(Logger::default())
             .wrap(RequestTracing::new())
             .wrap(RequestMetrics::default())
             .service(get_quote)
