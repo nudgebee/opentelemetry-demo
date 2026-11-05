@@ -93,6 +93,10 @@ func initDatabase() error {
 		return fmt.Errorf("failed to open database connection: %w", err)
 	}
 
+	if err := configurePool(db); err != nil {
+		return err
+	}
+
 	reg, err = otelsql.RegisterDBStatsMetrics(db, dbAttrs)
 	if err != nil {
 		return fmt.Errorf("failed to register database metrics: %w", err)
@@ -198,6 +202,7 @@ func main() {
 	// Cache the postgresFailure flag in the background (cancellable ctx → the goroutine
 	// stops on shutdown) so the query path never evaluates flagd per request.
 	startPostgresFlagWatcher(ctx)
+	startPriceRefresher(ctx)
 
 	go func() {
 		if err := srv.Serve(ln); err != nil {
