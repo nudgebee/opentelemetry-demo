@@ -483,12 +483,34 @@ func (cs *checkout) quoteShipping(ctx context.Context, address *pb.Address, item
 		return nil, fmt.Errorf("failed to marshal ship order request: %+v", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", cs.shippingSvcAddr+"/get-quote", bytes.NewBuffer(quotePayload))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %+v", err)
+	var resp *http.Response
+	maxRetries := 3
+	backoff := 100 * time.Millisecond
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		var req *http.Request
+		req, err = http.NewRequestWithContext(ctx, "POST", cs.shippingSvcAddr+"/get-quote", bytes.NewBuffer(quotePayload))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %+v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err = cs.httpClient.Do(req)
+		if err == nil {
+			break
+		}
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+
+		if attempt < maxRetries-1 {
+			select {
+			case <-ctx.Done():
+				return nil, fmt.Errorf("failed POST to shipping service: %+v", ctx.Err())
+			case <-time.After(backoff):
+				backoff *= 2
+			}
+		}
 	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := cs.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed POST to shipping service: %+v", err)
 	}
