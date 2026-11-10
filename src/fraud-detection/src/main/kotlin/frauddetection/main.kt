@@ -36,7 +36,7 @@ private val logger: Logger = LogManager.getLogger(groupID)
 // than FRAUD_HISTORY_WINDOW (ISO-8601 duration, e.g. PT24H) is dropped; when it
 // is unset every order is kept.
 private const val featureDims = 512
-private val historyWindow: Duration? = System.getenv("FRAUD_HISTORY_WINDOW")?.takeIf { it.isNotBlank() }?.let(Duration::parse)
+private val historyWindow: Duration = System.getenv("FRAUD_HISTORY_WINDOW")?.takeIf { it.isNotBlank() }?.let(Duration::parse) ?: Duration.ofHours(24)
 
 private class PastOrder(val at: Instant, val features: DoubleArray)
 
