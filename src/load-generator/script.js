@@ -300,7 +300,8 @@ export async function browserScenario() {
         return
     }
 
-    const page = await browser.newPage()
+    const context = await browser.newContext()
+    const page = await context.newPage()
     const isCurrencyChange = cryptoRandom() < 0.5
     const span = tracer.startSpan(isCurrencyChange ? 'browser_change_currency' : 'browser_add_to_cart')
     try {
@@ -317,6 +318,7 @@ export async function browserScenario() {
     } finally {
         span.end()
         await page.close()
+        await context.close()
     }
 
     sleep(cryptoRandom() * 9 + 1)
