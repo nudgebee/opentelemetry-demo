@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -474,6 +476,14 @@ func mustCreateClient(svcAddr string) *grpc.ClientConn {
 	return c
 }
 
+func isRetryableShippingError(err error) bool {
+	if errors.Is(err, io.EOF) || errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
+	errStr := strings.ToLower(err.Error())
+	return strings.Contains(errStr, "eof") || strings.Contains(errStr, "connection reset")
+}
+
 func (cs *checkout) quoteShipping(ctx context.Context, address *pb.Address, items []*pb.CartItem) (*pb.Money, error) {
 	quotePayload, err := json.Marshal(map[string]interface{}{
 		"address": address,
@@ -483,13 +493,20 @@ func (cs *checkout) quoteShipping(ctx context.Context, address *pb.Address, item
 		return nil, fmt.Errorf("failed to marshal ship order request: %+v", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", cs.shippingSvcAddr+"/get-quote", bytes.NewBuffer(quotePayload))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %+v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := cs.httpClient.Do(req)
-	if err != nil {
+	var resp *http.Response
+	for attempt := 0; attempt < 2; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, "POST", cs.shippingSvcAddr+"/get-quote", bytes.NewReader(quotePayload))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %+v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err = cs.httpClient.Do(req)
+		if err == nil {
+			break
+		}
+		if attempt == 0 && isRetryableShippingError(err) {
+			continue
+		}
 		return nil, fmt.Errorf("failed POST to shipping service: %+v", err)
 	}
 	defer resp.Body.Close()
