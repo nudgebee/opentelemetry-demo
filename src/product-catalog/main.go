@@ -476,10 +476,15 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 		if errors.Is(err, context.DeadlineExceeded) {
 			return nil, status.Errorf(codes.DeadlineExceeded, "request timed out")
 		}
-		msg := fmt.Sprintf("Product Not Found: %s", req.Id)
-		span.SetStatus(otelcodes.Error, msg)
-		span.AddEvent(msg)
-		return nil, status.Error(codes.NotFound, msg)
+		if errors.Is(err, sql.ErrNoRows) || strings.Contains(err.Error(), "product not found") {
+			msg := fmt.Sprintf("Product Not Found: %s", req.Id)
+			span.SetStatus(otelcodes.Error, msg)
+			span.AddEvent(msg)
+			return nil, status.Error(codes.NotFound, msg)
+		}
+		span.SetStatus(otelcodes.Error, err.Error())
+		span.AddEvent(err.Error())
+		return nil, status.Errorf(codes.Internal, "failed to get product: %v", err)
 	}
 
 	span.AddEvent("Product Found")
