@@ -34,6 +34,7 @@ const ShippingGateway = () => ({
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(3000),
     });
 
     if (!response.ok) {
