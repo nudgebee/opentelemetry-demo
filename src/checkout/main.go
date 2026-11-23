@@ -209,8 +209,10 @@ func main() {
 	tracer = tp.Tracer("checkout")
 
 	svc := new(checkout)
+	customTransport := http.DefaultTransport.(*http.Transport).Clone()
+	customTransport.IdleConnTimeout = 30 * time.Second
 	svc.httpClient = &http.Client{
-		Transport: otelhttp.NewTransport(http.DefaultTransport),
+		Transport: otelhttp.NewTransport(customTransport),
 	}
 
 	mustMapEnv(&svc.shippingSvcAddr, "SHIPPING_ADDR")
@@ -483,14 +485,22 @@ func (cs *checkout) quoteShipping(ctx context.Context, address *pb.Address, item
 		return nil, fmt.Errorf("failed to marshal ship order request: %+v", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", cs.shippingSvcAddr+"/get-quote", bytes.NewBuffer(quotePayload))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %+v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := cs.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed POST to shipping service: %+v", err)
+	var resp *http.Response
+	maxAttempts := 3
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, "POST", cs.shippingSvcAddr+"/get-quote", bytes.NewReader(quotePayload))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %+v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err = cs.httpClient.Do(req)
+		if err == nil {
+			break
+		}
+		if attempt == maxAttempts-1 {
+			return nil, fmt.Errorf("failed POST to shipping service: %+v", err)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	defer resp.Body.Close()
 
