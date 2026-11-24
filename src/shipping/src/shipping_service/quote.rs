@@ -6,6 +6,7 @@ use opentelemetry::global;
 use opentelemetry::metrics::Counter;
 use opentelemetry_instrumentation_actix_web::ClientExt;
 use std::sync::LazyLock;
+use std::time::Duration;
 use std::{collections::HashMap, env};
 
 use anyhow::{Context, Result};
@@ -46,7 +47,9 @@ pub async fn create_quote_from_count(count: u32) -> Result<Quote, tonic::Status>
 }
 
 async fn request_quote(count: u32) -> Result<f64, anyhow::Error> {
-    let client = awc::Client::new();
+    let client = awc::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .finish();
     let quote_service_addr: String = format!(
         "{}{}",
         env::var("QUOTE_ADDR")
