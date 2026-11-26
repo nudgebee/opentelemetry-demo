@@ -301,6 +301,9 @@ components:
   #
   # Image: the demo's frontend-proxy, which is Envoy 1.39 with envsubst. Only the
   # collector address is substituted, so the template must contain no other `$`.
+  #
+  # nudgebee-scenario-lab's kubernetes/otel-demo-payment-quota adds the same
+  # sidecar to a demo installed without this file; keep the configs in step.
   payment:
     envOverrides:
       - name: PAYMENT_PORT

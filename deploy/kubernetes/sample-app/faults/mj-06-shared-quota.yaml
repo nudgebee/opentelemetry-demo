@@ -9,6 +9,10 @@
 # which limits payment to 5 calls/s across ALL callers, the way a card
 # processor limits a merchant account. Without it this job is harmless load.
 #
+# Also runnable from nudgebee-scenario-lab, kubernetes/otel-demo-payment-quota,
+# which installs the sidecar on any demo and refuses to break within 2 hours of
+# it. Keep the two copies of the Envoy config and the batch in step.
+#
 # Install the sidecar HOURS before running this, not minutes. If payment's own
 # rollout is the most recent change on it, an investigation blames that rollout
 # ("an overly restrictive quota was just added") and never asks who is using

@@ -121,6 +121,14 @@ Measured on dev:
 
 ## mj-06 needs the payment gateway
 
+mj-06 can also be run from
+[nudgebee-scenario-lab](https://github.com/nudgebee/nudgebee-scenario-lab)
+(`kubernetes/otel-demo-payment-quota/run.sh`), which adds the same sidecar to
+an existing demo, the alarm rules, and optionally a route to a NudgeBee agent.
+Its Job has the same id and label, so `fault.sh status` and `stop` see it.
+Keep the two in step: the Envoy config, the batch and the alert expressions are
+copies.
+
 mj-06 uses up a quota that only exists if payment runs the `processor-gateway`
 sidecar from `../values.yaml` (`payment:`). Without it the job is harmless
 extra load and nothing fails. Its alert on payment itself,
