@@ -12,8 +12,9 @@ spec:
     # An alert on payment itself, so a payment problem is not only ever visible
     # on its caller.
     #
-    # payment emits no metrics of its own (see scenarios.yaml), so every other
-    # rule can only see a payment fault as checkout errors. This one reads the
+    # payment emits no RPC metrics (see scenarios.yaml) -- only its transaction
+    # count and Node.js runtime metrics -- so every other rule can only see a
+    # payment fault as checkout errors. This one reads the
     # processor-gateway sidecar (values.yaml, `payment:`), the Envoy that plays
     # the card processor's account-wide quota. Its counters reach the backend
     # through the demo's collector like every other demo metric, labelled with

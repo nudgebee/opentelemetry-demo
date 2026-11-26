@@ -129,14 +129,14 @@ and stay silent. Exercised by
 
 ### Payment rules: `otel-demo-payment-alerts.yaml`
 
-payment emits no metrics of its own, so every other rule sees a payment
-problem only as checkout errors. `OtelDemoPaymentQuotaExhausted` alerts on
-payment itself: it reads the `processor-gateway` sidecar (`../values.yaml`,
-`payment:`), the Envoy that plays the card processor's account-wide quota of
-5 calls/s, and fires when that quota refuses more than 0.5 calls/s for a
-minute. The counters reach the backend through the demo's collector, which
-labels them with the payment pod. Without the sidecar the rule matches
-nothing and stays silent.
+payment emits no RPC metrics, only its transaction count and Node.js runtime
+metrics, so every other rule sees a payment problem only as checkout errors.
+`OtelDemoPaymentQuotaExhausted` alerts on payment itself: it reads the
+`processor-gateway` sidecar (`../values.yaml`, `payment:`), the Envoy that
+plays the card processor's account-wide quota of 5 calls/s, and fires when
+that quota refuses more than 0.5 calls/s for a minute. The counters reach the
+backend through the demo's collector, which labels them with the payment pod.
+Without the sidecar the rule matches nothing and stays silent.
 
 Verified with fault [mj-06](../faults/mj-06-shared-quota.yaml): firing while
 the gateway refused 14.9 calls/s, alongside `OtelDemoGRPCServerErrorRate` on

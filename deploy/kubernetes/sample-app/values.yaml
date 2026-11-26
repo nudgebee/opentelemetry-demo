@@ -296,8 +296,9 @@ components:
   # on its own.
   #
   # The sidecar sends its counters through the demo's own collector (OTLP),
-  # which is the only way payment gets metrics at all -- the service emits none
-  # (see scenarios.yaml). alerts/otel-demo-dependency-alerts.yaml alerts on them.
+  # which gives payment RPC metrics -- the service emits only its transaction
+  # count and Node.js runtime metrics (see scenarios.yaml).
+  # alerts/otel-demo-payment-alerts.yaml alerts on them.
   #
   # Image: the demo's frontend-proxy, which is Envoy 1.39 with envsubst. Only the
   # collector address is substituted, so the template must contain no other `$`.

@@ -60,7 +60,9 @@ spec:
           # The demo's recommendation image already has Python, grpcio, the
           # generated demo_pb2 stubs and the OTel auto-instrumentation, so this
           # needs no new image. Its exporter is OTLP/gRPC only, hence the gRPC
-          # endpoint rather than __OTEL_ENDPOINT__.
+          # endpoint rather than __OTEL_ENDPOINT__. The code below is part of the
+          # applied Job, which an investigation can read, so its comments say
+          # only what a real batch's would.
           image: ghcr.io/open-telemetry/demo:3.0.0-recommendation
           workingDir: /app
           command:
@@ -82,9 +84,7 @@ spec:
               lock, counts = threading.Lock(), {"settled": 0, "deferred": 0}
 
               def worker():
-                  # Random start and uneven spacing: workers started together
-                  # would otherwise fire in lockstep and the quota would refill
-                  # between their bursts.
+                  # Spread the workers out rather than firing together.
                   nxt = time.monotonic() + random.uniform(0, 1 / rate)
                   while True:
                       delay = nxt - time.monotonic()
@@ -110,6 +110,11 @@ spec:
                       counts.update(settled=0, deferred=0)
                   print(f"settlement batch: {done['settled']} settled, {done['deferred']} deferred to the next pass", flush=True)
               print("settlement batch finished", flush=True)
+              try:  # send the last spans before the hard exit below skips the SDK's own shutdown
+                  from opentelemetry import trace
+                  getattr(trace.get_tracer_provider(), "shutdown", lambda: None)()
+              except Exception:
+                  pass
               os._exit(0)
           env:
             - name: PAYMENT_ADDR
