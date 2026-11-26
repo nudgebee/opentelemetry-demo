@@ -1,0 +1,143 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# id:       mj-06
+# category: infra
+# summary:  A settlement batch starts charging through payment and uses up the processor's shared quota.
+#
+# Needs: the `processor-gateway` sidecar on payment (values.yaml, `payment:`),
+# which limits payment to 5 calls/s across ALL callers, the way a card
+# processor limits a merchant account. Without it this job is harmless load.
+#
+# Also runnable from nudgebee-scenario-lab, kubernetes/otel-demo-payment-quota,
+# which installs the sidecar on any demo and refuses to break within 2 hours of
+# it. Keep the two copies of the Envoy config and the batch in step.
+#
+# Install the sidecar HOURS before running this, not minutes. If payment's own
+# rollout is the most recent change on it, an investigation blames that rollout
+# ("an overly restrictive quota was just added") and never asks who is using
+# the quota -- seen on the first dev run, with the sidecar 19 minutes old. A
+# real processor limit has been there for months; the test needs the same.
+#
+# Mechanism: a second caller of payment. The demo has only one, checkout, at
+# well under 1 call/s. This Job charges at ~20 calls/s, so the shared quota is
+# gone: the gateway refuses about three calls in four with RESOURCE_EXHAUSTED,
+# whoever made them, and checkout fails orders whose charge was refused.
+#
+# Expected symptoms:
+#   - checkout PlaceOrder errors (OtelDemoGRPCServerErrorRate on checkout)
+#   - payment refusing calls (OtelDemoPaymentQuotaExhausted on payment)
+#   - payment's own service healthy: it sees only the 5 calls/s let through
+#
+# The test is the same as mj-04's, cause versus consequence, with the cause one
+# step further away: the alert is on checkout, the limit is on payment, and what
+# changed is neither -- a new workload started sharing the limit. The honest
+# answer names the job, not checkout or payment. Restarting or scaling either
+# changes nothing; the quota is per account.
+#
+# Self-expiring: the batch exits cleanly after DURATION_SECONDS, so the Job
+# completes rather than fails (a failed Job is its own event, timestamped to the
+# end of the incident). activeDeadlineSeconds is the backstop.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mj-06
+  namespace: __NAMESPACE__
+  labels:
+    maintenance.platform/job: mj-06
+spec:
+  activeDeadlineSeconds: 900
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        maintenance.platform/job: mj-06
+        app.kubernetes.io/name: settlement-sync
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: settlement-sync
+          # The demo's recommendation image already has Python, grpcio, the
+          # generated demo_pb2 stubs and the OTel auto-instrumentation, so this
+          # needs no new image. Its exporter is OTLP/gRPC only, hence the gRPC
+          # endpoint rather than __OTEL_ENDPOINT__. The code below is part of the
+          # applied Job, which an investigation can read, so its comments say
+          # only what a real batch's would.
+          image: ghcr.io/open-telemetry/demo:3.0.0-recommendation
+          workingDir: /app
+          command:
+            - /venv/bin/opentelemetry-instrument
+            - /venv/bin/python
+            - -c
+            - |
+              import os, random, threading, time
+              import grpc, demo_pb2, demo_pb2_grpc
+
+              stub = demo_pb2_grpc.PaymentServiceStub(grpc.insecure_channel(os.environ["PAYMENT_ADDR"]))
+              workers = int(os.environ["WORKERS"])
+              rate = float(os.environ["RATE_PER_WORKER"])
+              charge = demo_pb2.ChargeRequest(
+                  amount=demo_pb2.Money(currency_code="USD", units=42, nanos=0),
+                  credit_card=demo_pb2.CreditCardInfo(
+                      credit_card_number="4432-8015-6152-0454", credit_card_cvv=672,
+                      credit_card_expiration_year=2039, credit_card_expiration_month=1))
+              lock, counts = threading.Lock(), {"settled": 0, "deferred": 0}
+
+              def worker():
+                  # Spread the workers out rather than firing together.
+                  nxt = time.monotonic() + random.uniform(0, 1 / rate)
+                  while True:
+                      delay = nxt - time.monotonic()
+                      if delay > 0:
+                          time.sleep(delay)
+                      try:
+                          stub.Charge(charge, timeout=5)
+                          outcome = "settled"
+                      except grpc.RpcError:
+                          outcome = "deferred"
+                      with lock:
+                          counts[outcome] += 1
+                      nxt = max(nxt, time.monotonic()) + random.uniform(0.5, 1.5) / rate
+
+              for _ in range(workers):
+                  threading.Thread(target=worker, daemon=True).start()
+              print(f"settlement batch started: {workers} workers", flush=True)
+              end = time.monotonic() + float(os.environ["DURATION_SECONDS"])
+              while time.monotonic() < end:
+                  time.sleep(min(60, max(0, end - time.monotonic())))
+                  with lock:
+                      done = dict(counts)
+                      counts.update(settled=0, deferred=0)
+                  print(f"settlement batch: {done['settled']} settled, {done['deferred']} deferred to the next pass", flush=True)
+              print("settlement batch finished", flush=True)
+              try:  # send the last spans before the hard exit below skips the SDK's own shutdown
+                  from opentelemetry import trace
+                  getattr(trace.get_tracer_provider(), "shutdown", lambda: None)()
+              except Exception:
+                  pass
+              os._exit(0)
+          env:
+            - name: PAYMENT_ADDR
+              value: payment:8080
+            - name: WORKERS
+              value: "8"
+            - name: RATE_PER_WORKER
+              value: "2.5"
+            - name: DURATION_SECONDS
+              value: "840"
+            - name: OTEL_SERVICE_NAME
+              value: settlement-sync
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: __OTEL_GRPC_ENDPOINT__
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: grpc
+            - name: OTEL_METRICS_EXPORTER
+              value: none
+            - name: OTEL_LOGS_EXPORTER
+              value: none
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi

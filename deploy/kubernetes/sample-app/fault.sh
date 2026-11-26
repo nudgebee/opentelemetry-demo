@@ -114,23 +114,27 @@ dns_service() {
 
 # Read the collector endpoint off the demo's own load-generator rather than
 # hardcoding one, so a scenario that emits telemetry works on any install.
+# $1 = port: 4318 (OTLP/HTTP, the default) or 4317 (OTLP/gRPC).
 otel_endpoint() {
   local ep
   ep="$(kubectl -n "$NS" get deploy load-generator \
         -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="OTEL_COLLECTOR_NAME")].value}' 2>/dev/null || true)"
-  [ -n "$ep" ] || die "could not read OTEL_COLLECTOR_NAME from the load-generator deployment -- pass OTEL_ENDPOINT explicitly"
-  echo "http://${ep}:4318"
+  [ -n "$ep" ] || die "could not read OTEL_COLLECTOR_NAME from the load-generator deployment -- pass OTEL_ENDPOINT / OTEL_GRPC_ENDPOINT explicitly"
+  echo "http://${ep}:${1:-4318}"
 }
 
 render() {
-  local f="$1" dns="${DNS_SERVICE:-}" otel="${OTEL_ENDPOINT:-}"
+  local f="$1" dns="${DNS_SERVICE:-}" otel="${OTEL_ENDPOINT:-}" otel_grpc="${OTEL_GRPC_ENDPOINT:-}"
   if grep -q "__DNS_SERVICE__" "$f"; then
     [ -n "$dns" ] || dns="$(dns_service)"
   fi
   if grep -q "__OTEL_ENDPOINT__" "$f"; then
     [ -n "$otel" ] || otel="$(otel_endpoint)"
   fi
-  sed -e "s|__NAMESPACE__|$NS|g" -e "s|__DNS_SERVICE__|$dns|g" -e "s|__OTEL_ENDPOINT__|$otel|g" "$f"
+  if grep -q "__OTEL_GRPC_ENDPOINT__" "$f"; then
+    [ -n "$otel_grpc" ] || otel_grpc="$(otel_endpoint 4317)"
+  fi
+  sed -e "s|__NAMESPACE__|$NS|g" -e "s|__DNS_SERVICE__|$dns|g" -e "s|__OTEL_ENDPOINT__|$otel|g" -e "s|__OTEL_GRPC_ENDPOINT__|$otel_grpc|g" "$f"
 }
 
 case "${1:-}" in
