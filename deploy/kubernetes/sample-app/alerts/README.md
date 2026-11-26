@@ -127,6 +127,21 @@ Both need an accounting image built from this fork, which reports the
 and stay silent. Exercised by
 [Scenario K](../docs/11-silent-order-drop.md).
 
+### Payment rules: `otel-demo-payment-alerts.yaml`
+
+payment emits no metrics of its own, so every other rule sees a payment
+problem only as checkout errors. `OtelDemoPaymentQuotaExhausted` alerts on
+payment itself: it reads the `processor-gateway` sidecar (`../values.yaml`,
+`payment:`), the Envoy that plays the card processor's account-wide quota of
+5 calls/s, and fires when that quota refuses more than 0.5 calls/s for a
+minute. The counters reach the backend through the demo's collector, which
+labels them with the payment pod. Without the sidecar the rule matches
+nothing and stays silent.
+
+Verified with fault [mj-06](../faults/mj-06-shared-quota.yaml): firing while
+the gateway refused 14.9 calls/s, alongside `OtelDemoGRPCServerErrorRate` on
+checkout `PlaceOrder`.
+
 ## Gotcha: do not write a quantile rule on the DB duration metric
 
 `db_client_operation_duration_bucket` is exported with bucket boundaries

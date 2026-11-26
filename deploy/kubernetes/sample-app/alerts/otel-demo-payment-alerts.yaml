@@ -1,0 +1,46 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: otel-demo-payment-alerts
+  labels:
+    app: otel-demo
+spec:
+  groups:
+    # An alert on payment itself, so a payment problem is not only ever visible
+    # on its caller.
+    #
+    # payment emits no metrics of its own (see scenarios.yaml), so every other
+    # rule can only see a payment fault as checkout errors. This one reads the
+    # processor-gateway sidecar (values.yaml, `payment:`), the Envoy that plays
+    # the card processor's account-wide quota. Its counters reach the backend
+    # through the demo's collector like every other demo metric, labelled with
+    # the payment pod by the collector's k8sattributes processor.
+    #
+    # Used by fault mj-06, where a second caller uses up that quota.
+    - name: otel-demo-payment
+      interval: 15s
+      rules:
+        # Fires when the processor's quota refuses calls to payment. The counter
+        # only exists once something has been refused, so at rest the
+        # expression has no series rather than a zero.
+        #
+        # service_name is set here because the sidecar's counters carry none;
+        # it is what the alert's subject is resolved from.
+        - alert: OtelDemoPaymentQuotaExhausted
+          expr: |
+            sum by (k8s_deployment_name, namespace) (
+              rate(http_local_rate_limit_rate_limited{namespace="demo", envoy_local_http_ratelimit_prefix="processor_quota"}[2m])
+            ) > 0.5
+          for: 1m
+          labels:
+            severity: critical
+            service_name: payment
+          annotations:
+            summary: Card processor quota refusing payment calls in demo namespace
+            description: |
+              The card processor's quota in front of payment is refusing calls.
+              Deployment: {{ $labels.k8s_deployment_name }}
+              Refused: {{ $value | humanize }} calls/s

@@ -102,6 +102,7 @@ distinguishing signal is present:
 | mj-02 | spikes on many services at once | every dependency healthy; services that do not resolve names are unaffected |
 | mj-03 | checkout latency up             | checkout CPU *below* normal -- starved, not busy                            |
 | mj-04 | latency/errors at one component | RPS up **everywhere**; only the weakest saturates                           |
+| mj-06 | checkout fails orders           | payment's service healthy and seeing only 5 calls/s; the refusals are at its gateway, and the extra calls come from a job that is neither checkout nor payment |
 
 **Measure while the scenario is running.** A Chaos Mesh CR recovers the fault
 when `spec.duration` expires but leaves the object behind, so a reading taken
@@ -116,6 +117,20 @@ Measured on dev:
 | mj-02 | frontend p95 22.7ms -> 646.3ms; checkout 21.2ms -> 1150.6ms; jaeger unaffected               |
 | mj-03 | **no signal** at default load -- see the note in its file; needs traffic first               |
 | mj-04 | product-catalog 1.76 -> 11.5 rps, checkout 0.08 -> 0.59 rps                                  |
+| mj-06 | gateway 5.0 calls/s let through, 14.9 refused; checkout PlaceOrder 67% failed; checkout alert at +1.6 min, payment alert 1 min after its rule was applied |
+
+## mj-06 needs the payment gateway
+
+mj-06 uses up a quota that only exists if payment runs the `processor-gateway`
+sidecar from `../values.yaml` (`payment:`). Without it the job is harmless
+extra load and nothing fails. Its alert on payment itself,
+`OtelDemoPaymentQuotaExhausted`, is in `../alerts/otel-demo-payment-alerts.yaml`.
+
+Install the sidecar hours before the run. On the first dev run it was 19
+minutes old, and the investigation of the checkout alert blamed payment's own
+rollout ("an overly restrictive quota") and recommended rolling it back. It
+linked the payment alert correctly and traced the refusals to the quota, but
+never asked who was using it, although every refusal line names the caller.
 
 ## These faults are invisible without the degraded-latency rule
 
